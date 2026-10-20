@@ -1,0 +1,15 @@
+# Configuracao exclusiva do teste de leitura de PFX antigo.
+openssl_conf = openssl_init
+
+[openssl_init]
+providers = providers_section
+
+[providers_section]
+default = default_section
+legacy = legacy_section
+
+[default_section]
+activate = 1
+
+[legacy_section]
+activate = 1

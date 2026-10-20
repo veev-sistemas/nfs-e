@@ -1,0 +1,14 @@
+* text=auto
+*.sh text eol=lf
+*.py text eol=lf
+*.js text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.sql text eol=lf
+*.pas text eol=lf
+*.dpr text eol=lf
+*.md text eol=lf
+*.template text eol=lf
+Dockerfile text eol=lf
+*.png binary
+*.res binary
