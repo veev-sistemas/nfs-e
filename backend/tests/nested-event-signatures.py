@@ -14,7 +14,9 @@ xml=f'''<evento xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.01"><infEv
 (out/'event-unsigned.xml').write_text(xml,encoding='utf-8')
 for name in ['inner-test','outer-test']:
     private=rsa.generate_private_key(public_exponent=65537,key_size=2048)
-    now=datetime.now(timezone.utc);dn=x509.Name([x509.NameAttribute(NameOID.COMMON_NAME,name)])
+    now=datetime.now(timezone.utc)
+    dn=x509.Name([x509.NameAttribute(NameOID.COMMON_NAME,name)]+[
+        x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME,('PUBLIC FICTITIOUS CERTIFICATE '+str(n)+' ').ljust(64,'X')) for n in range(45)])
     cert=x509.CertificateBuilder().subject_name(dn).issuer_name(dn).public_key(private.public_key()).serial_number(x509.random_serial_number()).not_valid_before(now-timedelta(days=1)).not_valid_after(now+timedelta(days=1)).sign(private,hashes.SHA256())
     (out/(name+'.pfx')).write_bytes(pkcs12.serialize_key_and_certificates(name.encode(),private,cert,None,serialization.BestAvailableEncryption(b'Nested-test-2026')))
 print('Generated two entirely fictitious A1 certificates. Never package these test fixtures.')

@@ -62,7 +62,7 @@ begin
       Q.ParamByName('attempt').AsWideString:=AttemptId; Q.ParamByName('company').AsWideString:=Company; Q.ExecSQL;
       Q.SQL.Text:='select finish_cancellation(cast(:company as uuid),cast(:attempt as uuid),''cancelled'',cast(:result as jsonb),:xml)';
       Q.ParamByName('company').AsWideString:=Company; Q.ParamByName('attempt').AsWideString:=AttemptId;
-      Q.ParamByName('result').AsWideString:=Report.ToJSON; Q.ParamByName('xml').AsWideString:=Xml; Q.Open; Q.Close;
+      Q.ParamByName('result').AsWideMemo:=Report.ToJSON; Q.ParamByName('xml').AsWideMemo:=Xml; Q.Open; Q.Close;
       Conn.Commit;
     except on E:Exception do
       begin
@@ -207,8 +207,8 @@ begin
     Report.AddPair('status',State);
     try
       SQL('select finish_cancellation(cast(:company as uuid),cast(:attempt as uuid),:status,cast(:result as jsonb),:xml)');
-      Q.ParamByName('status').AsWideString:=State; Q.ParamByName('result').AsWideString:=Report.ToJSON;
-      Q.ParamByName('xml').AsWideString:=Xml; Q.Open; Q.Close;
+      Q.ParamByName('status').AsWideString:=State; Q.ParamByName('result').AsWideMemo:=Report.ToJSON;
+      Q.ParamByName('xml').AsWideMemo:=Xml; Q.Open; Q.Close;
     except
       // Keep the persisted sending reservation: never re-send after an uncertain result.
       on E:Exception do raise EEmissionError.Create('Cancelamento sem confirmacao local. Consulte a tentativa; nao reenvie.');

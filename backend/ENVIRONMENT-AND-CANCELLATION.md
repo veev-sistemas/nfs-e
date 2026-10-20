@@ -20,6 +20,8 @@ A reserva é persistida antes de chamar a SEFIN. Bloqueio por nota e índice ún
 
 O identificador usado para localizar o arquivo é consultado como UUID convertido em texto, preservando o formato dos diretórios. A cópia local `vendor/acbr-compat/ACBrDFeXsLibXml2.pas` corrige a seleção do `SignedInfo`: deve pertencer à assinatura selecionada, em vez de selecionar a primeira ocorrência do documento. Isso preserva a conferência criptográfica de eventos com assinaturas aninhadas. A instalação compartilhada do ACBr permanece intacta. Falhas de validação são registradas apenas em arquivo privado, sem dados de chave privada ou senha.
 
+XML e resultado JSON são vinculados como `AsWideMemo`, sem o limite de tamanho do parâmetro `AsWideString`. A regressão utiliza dois certificados fictícios grandes para produzir um evento assinado com mais de 12 mil caracteres e verificar sua confirmação integral no banco.
+
 Para suporte dentro do container, `NfseBackend --reconcile-saved-cancellation UUID_EMPRESA UUID_NOTA` executa a mesma validação local e encerra, sem iniciar servidor HTTP, acessar a chave privada ou transmitir evento. Conferir depois o estado persistido. Não utilizar esse comando para forçar um estado: um arquivo inválido ou ausente mantém a pendência.
 
 Não foram emitidas ou canceladas notas reais na validação. O teste HTTP mantém ambos os ambientes desabilitados e utiliza banco e certificados fictícios; o probe Delphi prepara pedidos sem instanciar serviço HTTP, validados contra os XSDs de ambos os ambientes.

@@ -7,6 +7,7 @@ import xml.etree.ElementTree as ET
 root=Path(__file__).resolve().parents[1]
 fixtures=root/'build/nested-events'
 xml=(fixtures/'event-valid.xml').read_text(encoding='utf-8-sig')
+assert len(xml)>12000, 'The fixture must exceed the former FireDAC wide-string parameter limit.'
 bad_xml=(fixtures/'event-tampered.xml').read_text(encoding='utf-8-sig')
 ns={'n':'http://www.sped.fazenda.gov.br/nfse'}
 info=ET.fromstring(xml).find('n:infEvento/n:pedRegEvento/n:infPedReg',ns)
