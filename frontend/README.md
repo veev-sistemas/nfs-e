@@ -1,5 +1,7 @@
 # Frontend VEEV NFS-e
 
+Producao (migracao 008): seletor de ambiente, consultas separadas e confirmacao obrigatoria de validade fiscal. A emissao exige liberacao da empresa e do servidor; [instrucoes do piloto](../backend/PRODUCTION.md). O modo local `--demo` e ficticio e bloqueia qualquer emissao real.
+
 Em Configuracoes ha a opcao Enviar grupo IBS/CBS e os codigos fiscais. O perfil implementado e validado em homologacao utiliza CST 200, cClassTrib 200048 e cIndOp 030101. Salvar um codigo nao ativa o grupo. Os valores de cada rascunho permanecem no snapshot. Desmarcar o grupo nao resolve E0855 de um ambiente que exija essas informacoes.
 
 Em `/admin.html`, as acoes **Numeracao DPS** e **Certificado A1** permitem configurar a proxima DPS por empresa/serie/ambiente e instalar um PFX/P12 com senha. Requer backend atualizado e migracao 007. Consulte `../backend/CERTIFICATES-AND-NUMBERING.md` para implantacao e backup privado. Producao permanece somente em preparacao.

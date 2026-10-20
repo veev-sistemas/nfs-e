@@ -78,7 +78,26 @@ function renderCompanies() {
     button.onclick=()=>numberingForm(list[index]);row.querySelector('.actions').append(button);
     const certificate=document.createElement('button');certificate.className='text-button';certificate.textContent='Certificado A1';
     certificate.onclick=()=>certificateForm(list[index]);row.querySelector('.actions').append(certificate);
+    const production=document.createElement('button');production.className='text-button';production.textContent='Produção';
+    production.onclick=()=>productionForm(list[index]);row.querySelector('.actions').append(production);
   });
+}
+
+async function productionForm(company) {
+  try {
+    const config=await api('/companies/'+company.id+'/production');
+    dialog.innerHTML=`<h2 id="admin-dialog-title">Emissão em produção</h2><p>${esc(company.name)}<br>${esc(cnpj(company.document))}</p><p class="subtle">Produção gera notas reais com validade fiscal. Configure primeiro a numeração DPS e o certificado da empresa.</p><dl class="details"><div><dt>Liberação da empresa</dt><dd>${config.production_enabled?'Liberada':'Bloqueada'}</dd></div><div><dt>Servidor / piloto</dt><dd>${config.server_enabled&&config.pilot_allowed?'Habilitado':'Pendente'}</dd></div><div><dt>Fontes do DANFSe</dt><dd>${config.fonts_ready?'Instaladas':'Pendentes no servidor'}</dd></div></dl><form><label class="check"><input name="enabled" type="checkbox" ${config.production_enabled?'checked':''}> Liberar emissão em produção para esta empresa</label><label class="field">Série de produção já configurada<input name="series" value="${esc(config.production_series||'')}" pattern="(0|[1-9][0-9]{0,4})" maxlength="5" inputmode="numeric"></label><label class="check"><input type="checkbox" required> Conferi o certificado, os parâmetros fiscais e a sequência utilizada nos outros emissores.</label><p class="error" id="production-error" role="alert"></p><div class="actions"><button type="button" class="secondary" data-close>Cancelar</button><button class="primary" type="submit">Salvar liberação</button></div></form>`;
+    dialog.showModal();const form=dialog.querySelector('form');
+    form.querySelector('[data-close]').onclick=()=>dialog.close();
+    form.onsubmit=async event=>{
+      event.preventDefault();const button=form.querySelector('[type=submit]');button.disabled=true;
+      try {
+        await api('/companies/'+company.id+'/production',{method:'PATCH',body:{enabled:form.elements.enabled.checked,series:form.elements.series.value}});
+        dialog.close();notice('Liberação salva. A emissão também depende da habilitação do servidor para este CNPJ.');
+      }catch(error){form.querySelector('#production-error').textContent=error.message;}
+      finally{if(button.isConnected)button.disabled=false;}
+    };
+  }catch(error){notice(error.message);}
 }
 
 async function certificateForm(company) {
@@ -107,7 +126,7 @@ async function certificateForm(company) {
 async function numberingForm(company) {
   try {
     const config=await api('/companies/'+company.id+'/numbering');
-    dialog.innerHTML=`<h2 id="admin-dialog-title">Numeração da DPS</h2><p>${esc(company.name)}</p><p class="subtle">O número da NFS-e é atribuído pelo sistema nacional. Configure aqui a próxima DPS da mesma série, considerando também outros emissores.</p><form><label class="field">Ambiente<select name="environment"><option value="homologacao">Homologação</option><option value="producao">Produção · preparação</option></select></label><label class="field">Série da DPS<input name="series" required pattern="(0|[1-9][0-9]{0,4})" maxlength="5" inputmode="numeric"></label><p class="subtle" id="sequence-current"></p><label class="field">Próximo número da DPS<input name="next_number" required pattern="[1-9][0-9]{0,14}" maxlength="15" inputmode="numeric"></label><p class="subtle">Números reservados não serão reutilizados. A configuração de produção não habilita a emissão real.</p><label class="check"><input name="confirmed" type="checkbox" required> Conferi a última DPS desta série e a utilização em outros emissores.</label><p class="error" id="numbering-error" role="alert"></p><div class="actions"><button type="button" class="secondary" data-close>Cancelar</button><button class="primary" type="submit">Salvar numeração</button></div></form>`;
+    dialog.innerHTML=`<h2 id="admin-dialog-title">Numeração da DPS</h2><p>${esc(company.name)}</p><p class="subtle">O número da NFS-e é atribuído pelo sistema nacional. Configure aqui a próxima DPS da mesma série, considerando também outros emissores.</p><form><label class="field">Ambiente<select name="environment"><option value="homologacao">Homologação</option><option value="producao">Produção</option></select></label><label class="field">Série da DPS<input name="series" required pattern="(0|[1-9][0-9]{0,4})" maxlength="5" inputmode="numeric"></label><p class="subtle" id="sequence-current"></p><label class="field">Próximo número da DPS<input name="next_number" required pattern="[1-9][0-9]{0,14}" maxlength="15" inputmode="numeric"></label><p class="subtle">Números reservados não serão reutilizados. A numeração não libera a emissão: confira também a ação Produção.</p><label class="check"><input name="confirmed" type="checkbox" required> Conferi a última DPS desta série e a utilização em outros emissores.</label><p class="error" id="numbering-error" role="alert"></p><div class="actions"><button type="button" class="secondary" data-close>Cancelar</button><button type="submit" class="primary">Salvar numeração</button></div></form>`;
     dialog.showModal();const form=dialog.querySelector('form');let expected=null;
     const update=()=>{
       const seq=config.sequences.find(s=>s.environment===form.elements.environment.value&&s.series===form.elements.series.value);

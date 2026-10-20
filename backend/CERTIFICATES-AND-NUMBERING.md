@@ -1,5 +1,7 @@
 # Certificado A1 e numeracao DPS
 
+Este documento descreve a versao da migracao 007. Para a liberacao e o fluxo real introduzidos na migracao 008, seguir [PRODUCTION.md](PRODUCTION.md).
+
 ## Implantacao
 
 1. Aplicar `database/007-dps-sequences.sql` no Postgres Client, depois das migracoes 001 a 006. Fazer backup antes. Aplicar uma unica vez: a migracao importa os contadores atuais e preserva as tentativas existentes.

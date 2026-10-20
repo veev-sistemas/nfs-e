@@ -121,3 +121,5 @@ O repositorio contem fontes, testes e configuracoes de exemplo. Nao contem certi
 
 Certificado A1 pela administracao, armazenamento criptografado e controle de proxima DPS por ambiente/serie: aplicar tambem a migracao 007 e seguir [as instrucoes de implantacao e backup](backend/CERTIFICATES-AND-NUMBERING.md). Configuracao de producao e somente preparacao; a emissao real permanece pendente.
 
+Atualizacao: o fluxo de producao foi implementado na migracao 008 e permanece desabilitado por padrao. Seguir [a implantacao e o piloto controlado](backend/PRODUCTION.md), incluindo fontes do DANFSe, liberacao administrativa, serie e CNPJ permitido no servidor. Os ensaios automatizados sao locais; ainda e necessario validar a primeira emissao real apos implantar.
+

@@ -9,7 +9,7 @@ procedure HandleAdmin(Request: TWebRequest; Response: TWebResponse);
 implementation
 
 uses System.SysUtils, System.JSON, System.RegularExpressions, Data.DB,
-  FireDAC.Comp.Client, FireDAC.Stan.Error, FireDAC.Stan.Param, Nfse.Db, Nfse.Certificates;
+  FireDAC.Comp.Client, FireDAC.Stan.Error, FireDAC.Stan.Param, Nfse.Db, Nfse.Certificates, Nfse.Emission;
 
 type
   EAdminError = class(Exception)
@@ -185,6 +185,39 @@ begin
         CompanyId:=Parts[4]; Action:=Parts[5];
         try Guid:=StringToGUID('{'+CompanyId+'}');
         except on E:EConvertError do raise EAdminError.Create(422,'Empresa invalida.'); end;
+        if (Action='production') and (Method='GET') then
+        begin Response.Content:=EmissionConfig(Conn,CompanyId); Exit; end;
+        if (Action='production') and (Method='PATCH') then
+        begin
+          ReadBody; Value:=Body.GetValue('enabled');
+          if not (Value is TJSONBool) then raise EAdminError.Create(422,'enabled deve ser booleano.');
+          Enabled:=TJSONBool(Value).AsBoolean; Series:='';
+          if Enabled then
+          begin
+            Series:=ReadText(Body,'series',5);
+            if not TRegEx.IsMatch(Series,'^(0|[1-9][0-9]{0,4})$') then raise EAdminError.Create(422,'Serie invalida.');
+          end;
+          Conn.StartTransaction;
+          SQL('select c.document from fiscal_profiles f join companies c on c.id=f.company_id where f.company_id=cast(:company as uuid) for update of f'); Q.Open;
+          if Q.IsEmpty then raise EAdminError.Create(422,'Cadastre primeiro o perfil fiscal.');
+          Document:=Q.Fields[0].AsString; Q.Close;
+          if Enabled then
+          begin
+            SQL('select next_number from dps_sequences where company_id=cast(:company as uuid) and environment=''producao'' and series=:series');
+            Q.ParamByName('series').AsWideString:=Series; Q.Open;
+            if Q.IsEmpty then raise EAdminError.Create(422,'Configure primeiro a numeracao de producao desta serie.'); Q.Close;
+            CertificateWork:=''; CertificateResult:=nil;
+            try
+              CertificateResult:=CertificateOperation(CompanyId,Document,'status',nil,CertificateWork);
+              if not (CertificateResult.GetValue('configured') is TJSONTrue) then raise EAdminError.Create(422,'Instale primeiro o certificado A1.');
+            finally CertificateResult.Free; ClearCertificateWork(CertificateWork); end;
+          end;
+          SQL('insert into company_emission_config(company_id,production_enabled,production_series) values(cast(:company as uuid),:enabled,nullif(:series,'''')) '+
+            'on conflict(company_id) do update set production_enabled=excluded.production_enabled,production_series=coalesce(excluded.production_series,company_emission_config.production_series)');
+          Q.ParamByName('enabled').AsBoolean:=Enabled; Q.ParamByName('series').AsWideString:=Series; Q.ExecSQL;
+          if Enabled then Audit('production_enabled_'+Series) else Audit('production_disabled');
+          Conn.Commit; Response.Content:='{"status":"ok"}'; Exit;
+        end;
         if (Action='certificate') and ((Method='GET') or (Method='POST')) then
         begin
           SQL('select document from companies where id=cast(:company as uuid)'); Q.Open;

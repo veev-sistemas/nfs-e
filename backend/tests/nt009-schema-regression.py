@@ -14,6 +14,14 @@ def validate(path, valid):
     result = subprocess.run(['xmllint','--noout','--schema',str(schema),str(path)],capture_output=True)
     assert (result.returncode == 0) == valid, result.stderr.decode()
 
+for name in ['dps-producao.xml','dps-producao-ibs.xml']:
+    result=subprocess.run(['xmllint','--noout','--schema',str(root/'deploy/schemas-production/DPS_v1.01.xsd'),str(fixtures/name)],capture_output=True)
+    assert result.returncode==0,result.stderr.decode()
+    production=ET.parse(fixtures/name).getroot().find(ns+'infDPS')
+    assert production.find(ns+'tpAmb').text=='1' and production.find(ns+'finNFSe') is None
+    if 'ibs' in name:
+        assert production.find(ns+'IBSCBS').find(ns+'finNFSe').text=='0'
+        assert production.find(ns+'IBSCBS').find(ns+'valores').find(ns+'trib').find(ns+'gIBSCBS').find(ns+'CST').text=='200'
 for name in ['dps-sem-tomador.xml','dps-com-tomador.xml']:
     path = fixtures/name
     validate(path,True)

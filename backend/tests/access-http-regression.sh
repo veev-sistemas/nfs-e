@@ -24,6 +24,7 @@ SQL
 private_data="$(mktemp -d /tmp/nfse-certificate-regression.XXXXXXXX)"
 mkdir -m 700 "$private_data/certificates"
 NFSE_DATA_DIR="$private_data" NFSE_CERTIFICATES_DIR="$private_data/certificates" NFSE_CERTIFICATE_HELPER="$root/deploy/manage-certificate.py" \
+NFSE_ENABLE_PRODUCTION=0 NFSE_ENABLE_HOMOLOGATION=0 \
 NFSE_PORT=19002 NFSE_BIND=127.0.0.1 NFSE_DB_HOST=127.0.0.1 NFSE_DB_PORT=5432 \
  NFSE_DB_NAME=nfse_access_test NFSE_DB_USER=nfse_access_runner \
  NFSE_DB_PASSWORD=local-regression-only "$root/build/linux-api/NfseBackend" >/tmp/nfse-access-http.log 2>&1 &
@@ -36,6 +37,7 @@ done
 python3 "$root/tests/access-http-regression.py"
 python3 "$root/tests/admin-and-filters-regression.py"
 python3 "$root/tests/numbering-and-certificates-http.py"
+python3 "$root/tests/production-regression.py"
 if [[ "${NFSE_QA_KEEP_ALIVE:-0}" == "1" ]]; then
   runuser -u postgres -- psql -v ON_ERROR_STOP=1 -d nfse_access_test -c "UPDATE admin_users SET enabled=true,failed_attempts=0,locked_until=NULL WHERE username='regression-admin'" >/dev/null
   echo 'QA local pronta em 127.0.0.1:19002; finalizar este processo encerra a API.'

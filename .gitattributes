@@ -12,3 +12,4 @@
 Dockerfile text eol=lf
 *.png binary
 *.res binary
+backend/deploy/schemas-production/*.xsd -text

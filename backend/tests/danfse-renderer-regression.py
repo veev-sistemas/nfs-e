@@ -35,7 +35,7 @@ with TemporaryDirectory() as tmp:
         ('CNPJ divergente', fixture, {'expected_doc': '22222222222222'}),
         ('chave divergente', fixture, {'expected_key': '9' * 50}),
         ('hash divergente', fixture, {'expected_hash': '0' * 64}),
-        ('producao bloqueada', fixture.replace('<tpAmb>2', '<tpAmb>1'), {}),
+        ('ambiente invalido', fixture.replace('<tpAmb>2', '<tpAmb>0'), {}),
         ('DTD bloqueado', '<!DOCTYPE NFSe [<!ENTITY x "teste">]>' + fixture, {}),
         ('IBS/CBS incompleto', fixture.replace('</infDPS>', '<IBSCBS/></infDPS>'), {}),
     ]
@@ -66,6 +66,14 @@ with TemporaryDirectory() as tmp:
         assert value in content,value
     # vTotNF is an authoritative returned value, not vLiq + computed tax.
     assert 'R$ 100,60' not in content
+    # Mesmo XML sintetico: em producao nao pode haver tarja de homologacao.
+    production_xml=with_ibs.replace('<tpAmb>2','<tpAmb>1').replace('<IBSCBS><cIndOp>','<IBSCBS><finNFSe>0</finNFSe><cIndOp>').replace('<trib>\n    <CST>','<trib><gIBSCBS>\n    <CST>').replace('</cClassTrib></trib>','</cClassTrib></gIBSCBS></trib>')
+    xml.write_text(production_xml,encoding='utf-8')
+    renderer.generate(xml,pdf,doc,key)
+    production_text=PdfReader(pdf).pages[0].extract_text()
+    assert 'Tipo de Ambiente: Produção' in production_text
+    assert 'SEM VALIDADE JURÍDICA' not in production_text
+    assert 'R$ 100,00' in production_text and 'R$ 100,60' not in production_text
     for source in [with_ibs.replace('<vCBS>0.54</vCBS>',''),
                    with_ibs.replace('<vCBS>0.54</vCBS>','<vCBS>NaN</vCBS>'),
                    with_ibs.replace('<CST>200</CST>','<CST>000</CST>')]:

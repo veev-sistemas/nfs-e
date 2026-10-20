@@ -17,6 +17,7 @@ SETTINGS = {'tax_regime':'simples_nacional','service_code':'090103','municipal_s
 now = lambda: datetime.now(timezone.utc).isoformat()
 INVOICES = [{'id':str(uuid.uuid4()),'draft_id':None,'environment':'homologacao','access_key':'3'*50,'invoice_number':'2','issuer_document':COMPANY['document'],'amount_cents':10000,'status':'authorized_homologation','source':'sefin_api','imported_at':now()}]
 DRAFTS = [{'id':str(uuid.uuid4()),'customer_id':None,'amount_cents':25000,'settings':dict(SETTINGS),'status':'draft','created_at':now(),'attempt_id':None,'attempt_status':None}]
+DRAFTS.append(dict(DRAFTS[0],id=str(uuid.uuid4()),environment='producao',settings=dict(SETTINGS,service_description='SIMULACAO VISUAL - SEM TRANSMISSAO')))
 CUSTOMERS = [{'id':str(uuid.uuid4()),'name':'Cliente de demonstração','document':'11111111111'}]
 ATTEMPTS = {}
 TOKENS = set()
@@ -90,6 +91,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.respond(401,{'error':'Sessão inválida.'})
             return
         if path == '/auth/me': self.respond(200,COMPANY)
+        elif path == '/emission-config': self.respond(200,{'production_available':True,'production_enabled':True})
         elif path == '/auth/logout':
             TOKENS.discard(auth)
             self.respond(200,{'status':'ok'})
@@ -105,16 +107,18 @@ class Handler(SimpleHTTPRequestHandler):
         elif path == '/drafts':
             if self.command == 'POST':
                 draft = dict(id=str(uuid.uuid4()),customer_id=body.get('customer_id'),amount_cents=body['amount_cents'],
-                    settings=dict(SETTINGS,**body.get('overrides',{})),status='draft',created_at=now())
+                    settings=dict(SETTINGS,**body.get('overrides',{})),status='draft',created_at=now(),environment=body.get('environment','homologacao'))
                 DRAFTS.insert(0,draft)
                 self.respond(200,draft)
-            else: self.respond(200,DRAFTS)
+            else: self.respond(200,[d for d in DRAFTS if not query.get('environment') or d.get('environment','homologacao')==query['environment'][0]])
+        elif path.startswith('/drafts/') and path.endswith('/emit-production'):
+            self.respond(422,{'error':'Emissao real indisponivel nesta demonstracao ficticia. Nenhuma transmissao.'})
         elif path.startswith('/drafts/') and path.endswith('/emit-homologation'):
             draft = next(d for d in DRAFTS if d['id'] == path.split('/')[2])
             if draft.get('attempt_id'):
                 self.respond(200,ATTEMPTS[draft['attempt_id']])
                 return
-            attempt = dict(id=str(uuid.uuid4()),draft_id=draft['id'],status='authorized',dps_number=len(ATTEMPTS)+1,dps_series='901',result={'errors':[]})
+            attempt = dict(id=str(uuid.uuid4()),draft_id=draft['id'],environment='homologacao',status='authorized',dps_number=len(ATTEMPTS)+1,dps_series='901',result={'errors':[]})
             invoice = dict(id=str(uuid.uuid4()),draft_id=draft['id'],environment='homologacao',access_key='3'*50,invoice_number=str(len(INVOICES)+1),issuer_document=COMPANY['document'],amount_cents=draft['amount_cents'],status='authorized_homologation',source='sefin_api',imported_at=now())
             attempt['invoice_id'] = invoice['id']
             ATTEMPTS[attempt['id']] = attempt
@@ -129,6 +133,7 @@ class Handler(SimpleHTTPRequestHandler):
             date_to=query.get('date_to',[''])[0]
             filtered=[]
             for note in INVOICES:
+                if query.get('environment') and note['environment']!=query['environment'][0]: continue
                 day=datetime.fromisoformat(note.get('issued_at') or note['imported_at']).astimezone(ZoneInfo('America/Sao_Paulo')).date().isoformat()
                 if (not date_from or day>=date_from) and (not date_to or day<=date_to): filtered.append(note)
             self.respond(200,filtered)

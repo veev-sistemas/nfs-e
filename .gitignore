@@ -13,6 +13,9 @@ __history/
 *.p12
 *.key
 *.password
+*.a1.enc
+.secrets/
+certificate-requests/
 tmp/pdfs/
 output/pdf/
 backend/NfseBackend

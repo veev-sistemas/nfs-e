@@ -643,23 +643,27 @@ var
   dhEmissao: TdateTime;
 
 function GerarXMLIBSCBSNT009: TACBrXmlNode;
-var Valores, Trib: TACBrXmlNode;
+var Valores, Trib, Classification: TACBrXmlNode;
 begin
   // Perfil SEFIN observado: finNFSe em infDPS; indDest dentro de IBSCBS.
   // A publicacao do leiaute e a implantacao do ambiente podem divergir.
   // Perfil regular de hospedagem confirmado; sem ajustes, credito ou diferimento.
-  if (Ambiente <> taHomologacao) or
-     (NFSe.IBSCBS.valores.trib.gIBSCBS.CST <> cst200) or
+  if (NFSe.IBSCBS.valores.trib.gIBSCBS.CST <> cst200) or
      (NFSe.IBSCBS.valores.trib.gIBSCBS.cClassTrib <> '200048') or
      (NFSe.IBSCBS.cIndOp <> '030101') then
     raise Exception.Create('VEEV: perfil IBS/CBS nao suportado.');
   Result := CreateElement('IBSCBS');
+  // Producao oficial (20260209): finalidade dentro de IBSCBS.
+  if Ambiente=taProducao then
+    Result.AppendChild(AddNode(tcStr, '#1', 'finNFSe', 1, 1, 1, '0', ''));
   Result.AppendChild(AddNode(tcStr, '#1', 'cIndOp', 6, 6, 1, NFSe.IBSCBS.cIndOp, ''));
   Result.AppendChild(AddNode(tcStr, '#1', 'indDest', 1, 1, 1, '0', ''));
   Valores := CreateElement('valores');
   Trib := CreateElement('trib');
-  Trib.AppendChild(AddNode(tcStr, '#1', 'CST', 3, 3, 1, '200', ''));
-  Trib.AppendChild(AddNode(tcStr, '#1', 'cClassTrib', 6, 6, 1, '200048', ''));
+  if Ambiente=taProducao then Classification:=CreateElement('gIBSCBS') else Classification:=Trib;
+  Classification.AppendChild(AddNode(tcStr, '#1', 'CST', 3, 3, 1, '200', ''));
+  Classification.AppendChild(AddNode(tcStr, '#1', 'cClassTrib', 6, 6, 1, '200048', ''));
+  if Ambiente=taProducao then Trib.AppendChild(Classification);
   Valores.AppendChild(Trib);
   Result.AppendChild(Valores);
 end;
@@ -1086,6 +1090,11 @@ begin
   Result.AppendChild(AddNode(tcStr, '#1', 'cTribMun', 3, 3, 0,
                                    NFSe.Servico.CodigoTributacaoMunicipio, ''));
 
+  if Ambiente=taProducao then
+    Result.AppendChild(AddNode(tcStr, '#1', 'xDescServ', 1, 2000, 1,
+      StringReplace(NFSe.Servico.Discriminacao, Opcoes.QuebraLinha,
+                            FpAOwner.ConfigGeral.QuebradeLinha, [rfReplaceAll])));
+
   Result.AppendChild(AddNode(tcStr, '#1', 'cNBS', 9, 9, 0,
                                                    NFSe.Servico.CodigoNBS, ''));
 
@@ -1093,7 +1102,7 @@ begin
                                             NFSe.Servico.CodigoInterContr, ''));
 
   // NT009 v1.01: cNBS/cIntContrib precede the service description.
-  Result.AppendChild(AddNode(tcStr, '#1', 'xDescServ', 1, 2000, 1,
+  if Ambiente=taHomologacao then Result.AppendChild(AddNode(tcStr, '#1', 'xDescServ', 1, 2000, 1,
     StringReplace(NFSe.Servico.Discriminacao, Opcoes.QuebraLinha,
                           FpAOwner.ConfigGeral.QuebradeLinha, [rfReplaceAll])));
 end;

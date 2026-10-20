@@ -136,9 +136,12 @@ begin
   THorse.Patch('/v1/admin/companies/:id/numbering', Handle);
   THorse.Get('/v1/admin/companies/:id/certificate', Handle);
   THorse.Post('/v1/admin/companies/:id/certificate', Handle);
+  THorse.Get('/v1/admin/companies/:id/production', Handle);
+  THorse.Patch('/v1/admin/companies/:id/production', Handle);
   THorse.Post('/v1/auth/login', Handle);
   THorse.Post('/v1/auth/logout', Handle);
   THorse.Get('/v1/auth/me', Handle);
+  THorse.Get('/v1/emission-config', Handle);
   THorse.All('/v1/settings', Handle);
   THorse.All('/v1/customers', Handle);
   THorse.All('/v1/drafts', Handle);
@@ -148,6 +151,7 @@ begin
   THorse.Get('/v1/invoices/:id/xml', Handle);
   THorse.Get('/v1/invoices/:id/pdf', Handle);
   THorse.Post('/v1/drafts/:id/emit-homologation', Handle);
+  THorse.Post('/v1/drafts/:id/emit-production', Handle);
   THorse.Get('/v1/emission-attempts/:id', Handle);
 end;
 
@@ -187,7 +191,7 @@ var
   Amount: Int64;
   Guid: TGUID;
   InvoiceId, DraftId, InvoiceXml: string;
-  IssuedAt, Competence, DateFrom, DateTo: string;
+  IssuedAt, Competence, DateFrom, DateTo, Environment: string;
   ParsedDate: TDateTime;
   PdfBytes: TBytes;
 
@@ -326,9 +330,14 @@ begin
         ReturnQuery;
         Response.StatusCode := 201;
       end
+      else if (Route='/v1/emission-config') and (Method='GET') then
+        Response.Content:=EmissionConfig(Conn,Company)
       else if (Route = '/v1/drafts') and (Method = 'POST') then
       begin
         Body := ParseBody(Request);
+        Environment:='homologacao';
+        if Body.GetValue('environment')<>nil then Environment:=RequiredString(Body,'environment');
+        if (Environment<>'homologacao') and (Environment<>'producao') then raise EApiError.Create(422,'Ambiente invalido.');
         Customer := '';
         V := Body.GetValue('customer_id');
         if (V <> nil) and not (V is TJSONNull) then
@@ -353,8 +362,8 @@ begin
           raise EApiError.Create(422, 'overrides deve ser objeto.');
         Settings := TJSONObject(V);
         if Settings <> nil then ValidateSettings(Settings);
-        Run('insert into drafts(company_id, customer_id, amount_cents, settings_snapshot) ' +
-          'select f.company_id, c.id, :amount, f.settings || cast(:overrides as jsonb) ' +
+        Run('insert into drafts(company_id, customer_id, amount_cents, settings_snapshot,environment) ' +
+          'select f.company_id, c.id, :amount, f.settings || cast(:overrides as jsonb),:environment ' +
           'from fiscal_defaults f left join customers c on c.company_id = f.company_id ' +
           'and c.id = cast(nullif(:customer, '''') as uuid) ' +
           'where f.company_id = cast(:company as uuid) ' +
@@ -363,7 +372,8 @@ begin
           'and length(trim(coalesce((f.settings || cast(:overrides as jsonb))->>''service_description'', ''''))) > 0 ' +
           'and length(trim(coalesce((f.settings || cast(:overrides as jsonb))->>''tax_regime'', ''''))) > 0 ' +
           'returning jsonb_build_object(''id'', id, ''customer_id'', customer_id, ' +
-          '''amount_cents'', amount_cents, ''settings'', settings_snapshot, ''status'', status)::text');
+          '''amount_cents'', amount_cents, ''settings'', settings_snapshot, ''status'', status,''environment'',environment)::text');
+        Q.ParamByName('environment').AsWideString:=Environment;
         Q.ParamByName('amount').AsLargeInt := Amount;
         Q.ParamByName('customer').AsWideString := Customer;
         if Settings = nil then Q.ParamByName('overrides').AsWideString := '{}'
@@ -376,11 +386,14 @@ begin
       end
       else if (Route = '/v1/drafts') and (Method = 'GET') then
       begin
+        Environment:=Request.QueryFields.Values['environment'];
+        if (Environment<>'') and (Environment<>'homologacao') and (Environment<>'producao') then raise EApiError.Create(422,'Ambiente invalido.');
         Run('select coalesce(jsonb_agg(to_jsonb(d)), ''[]''::jsonb)::text from ' +
-          '(select r.id, r.customer_id, r.amount_cents, r.settings_snapshot as settings, r.status, r.created_at, ' +
+          '(select r.id, r.customer_id, r.amount_cents, r.settings_snapshot as settings, r.status, r.created_at,r.environment, ' +
           'a.id as attempt_id, a.status as attempt_status, a.invoice_id ' +
           'from drafts r left join emission_attempts a on a.company_id=r.company_id and a.draft_id=r.id ' +
-          'where r.company_id = cast(:company as uuid) order by r.created_at desc, r.id limit 100) d');
+          'where r.company_id = cast(:company as uuid) and (:environment='''' or r.environment=:environment) order by r.created_at desc, r.id limit 100) d');
+        Q.ParamByName('environment').AsWideString:=Environment;
         ReturnQuery;
       end
       else if (Copy(Route,1,11)='/v1/drafts/') and (Method='POST') then
@@ -400,7 +413,14 @@ begin
         if not TRegEx.IsMatch(Competence,'^\d{4}-\d{2}-\d{2}$') or
            not TryISO8601ToDate(Competence+'T00:00:00Z',ParsedDate,True) then
           raise EApiError.Create(422,'competence deve ser AAAA-MM-DD.');
-        Response.Content:=EmitHomologation(Conn,Company,DraftId,IssuedAt,Competence);
+        Environment:='homologacao';
+        if Route='/v1/drafts/'+DraftId+'/emit-production' then
+        begin
+          Environment:='producao';
+          if not (Body.GetValue('confirm_production') is TJSONTrue) then
+            raise EApiError.Create(422,'Confirme explicitamente a emissao com validade fiscal.');
+        end;
+        Response.Content:=EmitInvoice(Conn,Company,DraftId,IssuedAt,Competence,Environment);
       end
       else if (Copy(Route,1,22)='/v1/emission-attempts/') and (Method='GET') then
       begin
@@ -443,6 +463,9 @@ begin
       begin
         DateFrom:=Request.QueryFields.Values['date_from'];
         DateTo:=Request.QueryFields.Values['date_to'];
+        Environment:=Request.QueryFields.Values['environment'];
+        if (Environment<>'') and (Environment<>'homologacao') and (Environment<>'producao') then
+          raise EApiError.Create(422,'Ambiente invalido.');
         if (DateFrom<>'') and (not TRegEx.IsMatch(DateFrom,'^[0-9]{4}-[0-9]{2}-[0-9]{2}$') or
            not TryISO8601ToDate(DateFrom+'T00:00:00Z',ParsedDate,True)) then
           raise EApiError.Create(422,'Data inicial invalida. Use AAAA-MM-DD.');
@@ -455,11 +478,13 @@ begin
           '(select id, draft_id, environment, access_key, invoice_number, issuer_document, ' +
           'amount_cents, status, source, imported_at, issued_at from invoices ' +
           'where company_id=cast(:company as uuid) '+
+          'and (:environment='''' or environment=:environment) '+
           'and (:date_from='''' or issued_at >= (cast(nullif(:date_from,'''') as date)::timestamp at time zone ''America/Sao_Paulo'')) '+
           'and (:date_to='''' or issued_at < ((cast(nullif(:date_to,'''') as date)+1)::timestamp at time zone ''America/Sao_Paulo'')) '+
           'order by issued_at desc, id limit 100) i');
         Q.ParamByName('date_from').AsWideString:=DateFrom;
         Q.ParamByName('date_to').AsWideString:=DateTo;
+        Q.ParamByName('environment').AsWideString:=Environment;
         ReturnQuery;
       end
       else if (Copy(Route, 1, 13) = '/v1/invoices/') and (Method = 'GET') then
@@ -472,10 +497,11 @@ begin
         end;
         if Route = '/v1/invoices/' + InvoiceId + '/pdf' then
         begin
-          Run('select id from invoices where id=cast(:id as uuid) and company_id=cast(:company as uuid)');
+          Run('select id,environment from invoices where id=cast(:id as uuid) and company_id=cast(:company as uuid)');
           Q.ParamByName('id').AsWideString := InvoiceId;
           Q.Open;
           if Q.IsEmpty then raise EApiError.Create(404,'Nota nao encontrada.');
+          Environment:=Q.FieldByName('environment').AsString;
           Q.Close;
           try
             PdfBytes := DownloadDanfse(Conn,Company,InvoiceId);
@@ -483,7 +509,7 @@ begin
             on E:EEmissionError do raise EApiError.Create(502,E.Message);
           end;
           Response.ContentType := 'application/pdf';
-          Response.SetCustomHeader('Content-Disposition','attachment; filename="danfse-homologacao-'+InvoiceId+'.pdf"');
+          Response.SetCustomHeader('Content-Disposition','attachment; filename="danfse-'+Environment+'-'+InvoiceId+'.pdf"');
           Response.SetCustomHeader('X-Content-Type-Options','nosniff');
           Response.ContentStream := TBytesStream.Create(PdfBytes);
           Response.FreeContentStream := True;

@@ -56,6 +56,20 @@ begin
       Xml:=Note.GerarXML;
       if Xml='' then Xml:=Note.XmlRps;
       if Pos('<IBSCBS>',Xml)>0 then raise Exception.Create('Grupo IBS/CBS nao desativado.');
+      NFSe.Configuracoes.WebServices.Ambiente:=taProducao;
+      TFile.WriteAllText(TPath.Combine(ParamStr(1),'servicos.ini'),'[PadraoNacional]'+sLineBreak+
+        'Versao=1.01'+sLineBreak+'ProGerarNFSe=https://sefin.nfse.gov.br/SefinNacional'+sLineBreak,TEncoding.ASCII);
+      NFSe.Configuracoes.Arquivos.IniServicos:=TPath.Combine(ParamStr(1),'servicos.ini');
+      NFSe.Configuracoes.WebServices.LerParams;
+      NFSe.SetProvedor(proPadraoNacional,ve101);
+      if NFSe.Provider.ConfigWebServices.Producao.GerarNFSe<>'https://sefin.nfse.gov.br/SefinNacional' then
+        raise Exception.Create('Endpoint de producao incorreto.');
+      Xml:=Note.GerarXML;
+      if Pos('<tpAmb>1</tpAmb>',Xml)=0 then raise Exception.Create('DPS de producao sem tpAmb=1.');
+      TFile.WriteAllText(TPath.Combine(ParamStr(1),'dps-producao.xml'),Xml,TEncoding.UTF8);
+      Note.NFSe.IBSCBS.valores.trib.gIBSCBS.CST:=cst200;
+      Xml:=Note.GerarXML;
+      TFile.WriteAllText(TPath.Combine(ParamStr(1),'dps-producao-ibs.xml'),Xml,TEncoding.UTF8);
       Writeln('OK: geracao e regeneracao com finNFSe=0; sem certificado e sem transmissao.');
     finally NFSe.Free; end;
   except on E:Exception do begin Writeln(E.ClassName,': ',E.Message); ExitCode:=1; end; end;

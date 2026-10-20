@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""DANFSe v2.0 de homologacao, a partir do XML. Sem acesso a rede ou certificado.
+"""DANFSe v2.0 a partir do XML autorizado. Sem acesso a rede ou certificado.
 
-Escopo: NFS-e regular de homologacao, com/sem IBS/CBS de hospedagem.
+Escopo: NFS-e regular, com/sem IBS/CBS de hospedagem. Producao exige fontes do leiaute.
 Referencia: NT 008 v1.02, 14/07/2026, Anexo I.
 """
 import argparse
@@ -73,7 +73,9 @@ def ibs_data(info, dps):
     if (text(classification, 'CST'), text(classification, 'cClassTrib'),
             text(declared, 'cIndOp'), text(declared, 'indDest')) != ('200', '200048', '030101', '0'):
         raise ValueError('Perfil IBS/CBS fora do escopo de hospedagem em homologacao')
-    allowed = {'cIndOp', 'indDest', 'valores', 'indFinal'}
+    allowed = {'finNFSe', 'cIndOp', 'indDest', 'valores', 'indFinal'}
+    if text(declared,'finNFSe') not in ('','0'):
+        raise ValueError('Finalidade IBS/CBS fora do escopo regular')
     if any(node.tag not in {N + tag for tag in allowed} for node in declared):
         raise ValueError('Operacao especial IBS/CBS ainda nao suportada no DANFSe')
     if any(node.tag not in {N+'CST', N+'cClassTrib'} for node in classification):
@@ -117,7 +119,7 @@ def mapped(value, choices):
     return choices[value]
 
 
-def register_fonts():
+def register_fonts(production=False):
     roots = [Path(os.environ.get('NFSE_DANFSE_FONT_DIR', '/var/lib/nfse/fonts')),
              Path('C:/Windows/Fonts')]
     for root in roots:
@@ -125,6 +127,8 @@ def register_fonts():
             for name, file in [('DLabel', 'arialbd.ttf'), ('DRegular', 'arial.ttf'), ('DValue', 'micross.ttf')]:
                 pdfmetrics.registerFont(TTFont(name, str(root / file)))
             return 'Arial / Microsoft Sans Serif'
+    if production:
+        raise ValueError('Instale arial.ttf, arialbd.ttf e micross.ttf no diretorio privado NFSE_DANFSE_FONT_DIR para o DANFSe de producao')
     # Apenas homologacao: fonte livre compativel, nao declarada conforme para producao.
     for root in [Path('/usr/share/fonts/truetype/liberation2'), Path('/usr/share/fonts/truetype/liberation')]:
         if (root / 'LiberationSans-Regular.ttf').is_file():
@@ -135,9 +139,9 @@ def register_fonts():
 
 
 class Sheet:
-    def __init__(self, output):
+    def __init__(self, output, production=False):
         self.c = Canvas(str(output), pagesize=A4, pageCompression=1)
-        self.c.setTitle('DANFSe - homologacao')
+        self.c.setTitle('DANFSe - producao' if production else 'DANFSe - homologacao')
         self.c.setAuthor('VEEV')
         self.x, self.y, self.w = 2 * mm, 2 * mm, 206 * mm
         self.col = self.w / 4
@@ -212,8 +216,9 @@ def generate(xml_path, output, expected_doc='', expected_key='', expected_hash='
         raise ValueError('Esperado XML de NFS-e Nacional autorizada')
     info = elem(root, 'infNFSe')
     dps = elem(info, 'DPS/infDPS')
-    if text(dps, 'tpAmb') != '2' or text(info, 'cStat') != '100':
-        raise ValueError('Renderizador inicial limitado a NFS-e regular em homologacao')
+    if text(dps, 'tpAmb') not in ('1','2') or text(info, 'cStat') != '100':
+        raise ValueError('Ambiente ou autorizacao da NFS-e invalido')
+    production = text(dps, 'tpAmb') == '1'
     ibs = ibs_data(info, dps)
     key = info.attrib.get('Id', '')
     if not re.fullmatch(r'NFS\d{50}', key):
@@ -225,8 +230,8 @@ def generate(xml_path, output, expected_doc='', expected_key='', expected_hash='
         raise ValueError('Prestador inconsistente no XML')
     if expected_doc and expected_doc != issuer or expected_key and expected_key != key:
         raise ValueError('XML nao pertence a nota solicitada')
-    font_mode = register_fonts()
-    sheet = Sheet(output)
+    font_mode = register_fonts(production)
+    sheet = Sheet(output, production)
     c = sheet.c
     sheet.fill(sheet.x, sheet.y, sheet.w, 14 * mm)
     logo = Path(__file__).parent / 'danfse-assets/logo-nfse.png'
@@ -236,15 +241,16 @@ def generate(xml_path, output, expected_doc='', expected_key='', expected_hash='
     c.setFont('DLabel', 9)
     c.drawCentredString(105 * mm, A4[1] - 5.2 * mm, 'DANFSe v2.0')
     c.drawCentredString(105 * mm, A4[1] - 8.7 * mm, 'Documento Auxiliar da NFS-e')
-    c.setFillColor(colors.CMYKColor(0, 1, 1, 0))
-    c.drawCentredString(105 * mm, A4[1] - 12.5 * mm, 'NFS-e SEM VALIDADE JURÍDICA')
+    if not production:
+        c.setFillColor(colors.CMYKColor(0, 1, 1, 0))
+        c.drawCentredString(105 * mm, A4[1] - 12.5 * mm, 'NFS-e SEM VALIDADE JURÍDICA')
     c.setFillColor(colors.black)
     uf = text(emit, 'enderNac/UF')
     city = text(info, 'xLocEmi')
     sheet.paragraph('Município: ' + city + ' / ' + uf, 157 * mm, 3 * mm, 49 * mm, 5 * mm, size=8)
     sheet.paragraph('Ambiente Gerador: ' + mapped(text(info, 'ambGer'), {'1': 'Município', '2': 'Sefin Nacional'}),
                     157 * mm, 9 * mm, 49 * mm, 3 * mm, size=6)
-    sheet.paragraph('Tipo de Ambiente: Homologação', 157 * mm, 12 * mm, 49 * mm, 3 * mm, size=6)
+    sheet.paragraph('Tipo de Ambiente: '+('Produção' if production else 'Homologação'), 157 * mm, 12 * mm, 49 * mm, 3 * mm, size=6)
     sheet.advance(14)
     sheet.cell('Chave de Acesso da NFS-e', key, 0, 0, 3, ident=True)
     for label, value, col, row in [
@@ -402,7 +408,7 @@ def generate(xml_path, output, expected_doc='', expected_key='', expected_hash='
                     sheet.w - 2 * mm, A4[1] - sheet.y - 8 * mm)
     sheet.finish()
     return {'invoice_number': text(info, 'nNFSe'), 'access_key': key, 'fonts': font_mode,
-            'xml_sha256': hashlib.sha256(raw).hexdigest()}
+            'xml_sha256': hashlib.sha256(raw).hexdigest(),'environment':'producao' if production else 'homologacao'}
 
 
 def main():
@@ -415,7 +421,7 @@ def main():
     args = p.parse_args()
     try:
         result = generate(args.xml, args.pdf, args.document, args.key, args.sha256)
-        print('OK: DANFSe de homologacao gerado; fontes: ' + result['fonts'])
+        print('OK: DANFSe de '+result['environment']+' gerado; fontes: ' + result['fonts'])
     except Exception as exc:
         Path(args.pdf).unlink(missing_ok=True)
         print('DANFSe: ' + str(exc), file=sys.stderr)

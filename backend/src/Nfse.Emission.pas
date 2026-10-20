@@ -7,7 +7,8 @@ uses System.SysUtils, System.JSON, FireDAC.Comp.Client;
 type
   EEmissionError = class(Exception);
 
-function EmitHomologation(Conn: TFDConnection; const Company, Draft, IssuedAt, Competence: string): string;
+function EmitInvoice(Conn: TFDConnection; const Company, Draft, IssuedAt, Competence, Environment: string): string;
+function EmissionConfig(Conn: TFDConnection; const Company: string): string;
 function DownloadDanfse(Conn: TFDConnection; const Company, Invoice: string): TBytes;
 
 implementation
@@ -47,8 +48,32 @@ begin
   for C in Value do if not CharInSet(C,['0'..'9']) then raise EEmissionError.Create('Codigo fiscal deve ser numerico.');
 end;
 
-function EmitHomologation(Conn: TFDConnection; const Company, Draft, IssuedAt, Competence: string): string;
-const BaseURL = 'https://sefin.producaorestrita.nfse.gov.br/SefinNacional';
+function EmissionConfig(Conn: TFDConnection; const Company: string): string;
+var Q: TFDQuery; Fonts: string; Ready: Boolean;
+begin
+  Fonts:=GetEnvironmentVariable('NFSE_DANFSE_FONT_DIR');
+  if Fonts='' then Fonts:=TPath.Combine(GetEnvironmentVariable('NFSE_DATA_DIR'),'fonts');
+  Ready:=FileExists(TPath.Combine(Fonts,'arial.ttf')) and FileExists(TPath.Combine(Fonts,'arialbd.ttf')) and FileExists(TPath.Combine(Fonts,'micross.ttf'));
+  Q:=TFDQuery.Create(nil);
+  try
+    Q.Connection:=Conn;
+    Q.SQL.Text:='select jsonb_build_object(''production_enabled'',coalesce(e.production_enabled,false),'+
+      '''production_series'',e.production_series,''server_enabled'',cast(:server as boolean),''pilot_allowed'',c.document=:pilot,'+
+      '''fonts_ready'',cast(:fonts as boolean),''production_available'',coalesce(e.production_enabled,false) '+
+      'and cast(:server as boolean) and c.document=:pilot and cast(:fonts as boolean) and exists(select 1 from dps_sequences s '+
+      'where s.company_id=c.id and s.environment=''producao'' and s.series=e.production_series))::text '+
+      'from companies c left join company_emission_config e on e.company_id=c.id where c.id=cast(:company as uuid)';
+    Q.ParamByName('company').AsWideString:=Company;
+    Q.ParamByName('server').AsBoolean:=GetEnvironmentVariable('NFSE_ENABLE_PRODUCTION')='1';
+    Q.ParamByName('pilot').AsWideString:=GetEnvironmentVariable('NFSE_PRODUCTION_ALLOWED_CNPJ');
+    Q.ParamByName('fonts').AsBoolean:=Ready;
+    Q.Open;
+    if Q.IsEmpty then raise EEmissionError.Create('Empresa nao encontrada.');
+    Result:=Q.Fields[0].AsString;
+  finally Q.Free; end;
+end;
+
+function EmitInvoice(Conn: TFDConnection; const Company, Draft, IssuedAt, Competence, Environment: string): string;
 var
   Q: TFDQuery;
   Envelope, Attempt, Payload, Profile, Settings, CompanyData, Customer: TJSONObject;
@@ -64,6 +89,8 @@ var
   Fmt: TFormatSettings;
   CertificateWork, CertificatePath: string;
   CertificateResult: TJSONObject;
+  BaseURL, InvoiceStatus, ConfigJson: string;
+  Production: Boolean;
 
   procedure Execute(const SQL: string);
   begin
@@ -81,11 +108,29 @@ var
   end;
 
 begin
-  if GetEnvironmentVariable('NFSE_ENABLE_HOMOLOGATION') <> '1' then
+  Production:=Environment='producao';
+  if not Production and (Environment<>'homologacao') then raise EEmissionError.Create('Ambiente invalido.');
+  if not Production and (GetEnvironmentVariable('NFSE_ENABLE_HOMOLOGATION') <> '1') then
     raise EEmissionError.Create('Emissao de homologacao ainda nao habilitada no servidor.');
+  if Production then
+  begin
+    ConfigJson:=EmissionConfig(Conn,Company);
+    CertificateResult:=TJSONObject.ParseJSONValue(ConfigJson) as TJSONObject;
+    try
+      if not (CertificateResult.GetValue('production_available') is TJSONTrue) then
+        raise EEmissionError.Create('Producao indisponivel. Confira liberacao da empresa, piloto no servidor, serie e fontes do DANFSe.');
+    finally CertificateResult.Free; end;
+    BaseURL:='https://sefin.nfse.gov.br/SefinNacional'; InvoiceStatus:='authorized_production';
+  end
+  else begin BaseURL:='https://sefin.producaorestrita.nfse.gov.br/SefinNacional'; InvoiceStatus:='authorized_homologation'; end;
   CertRoot := GetEnvironmentVariable('NFSE_CERTIFICATES_DIR');
   DataRoot := GetEnvironmentVariable('NFSE_DATA_DIR');
   SchemaRoot := GetEnvironmentVariable('NFSE_SCHEMAS_DIR');
+  if Production then
+  begin
+    SchemaRoot:=GetEnvironmentVariable('NFSE_PRODUCTION_SCHEMAS_DIR');
+    if SchemaRoot='' then SchemaRoot:='/app/schemas-production';
+  end;
   if (CertRoot='') or (DataRoot='') or not FileExists(TPath.Combine(SchemaRoot,'DPS_v1.01.xsd')) then
     raise EEmissionError.Create('Diretorios fiscais ou schemas nao configurados.');
   Q := TFDQuery.Create(nil);
@@ -96,8 +141,8 @@ begin
   CertificateWork:=''; CertificateResult:=nil;
   try
     Execute('select (to_jsonb(a)-''signed_dps''-''invoice_xml''-''response_text'')::text from emission_attempts a '+
-      'where company_id=cast(:company as uuid) and draft_id=cast(:draft as uuid)');
-    Q.ParamByName('draft').AsWideString:=Draft; Q.Open;
+      'where company_id=cast(:company as uuid) and draft_id=cast(:draft as uuid) and environment=:environment');
+    Q.ParamByName('draft').AsWideString:=Draft; Q.ParamByName('environment').AsWideString:=Environment; Q.Open;
     if not Q.IsEmpty then begin Result:=Q.Fields[0].AsString; Exit; end;
     Q.Close;
     Execute('select document from companies where id=cast(:company as uuid)'); Q.Open;
@@ -125,7 +170,8 @@ begin
       finally Settings.Free; end;
     end;
     Q.Close;
-    Execute('select reserve_homologation(cast(:company as uuid),cast(:draft as uuid),cast(:issued as timestamptz),cast(:competence as date))::text');
+    Execute('select reserve_emission(cast(:company as uuid),cast(:draft as uuid),cast(:issued as timestamptz),cast(:competence as date),:environment)::text');
+    Q.ParamByName('environment').AsWideString:=Environment;
     Q.ParamByName('draft').AsWideString := Draft;
     Q.ParamByName('issued').AsWideString := IssuedAt;
     Q.ParamByName('competence').AsWideString := Competence;
@@ -155,7 +201,7 @@ begin
         Settings := Obj(Payload,'settings');
         CompanyData := Obj(Payload,'company');
         if (S(Profile,'municipality_code')<>'3136702') or (S(Profile,'state_code')<>'MG') then
-          raise EEmissionError.Create('Perfil inicial de homologacao limitado a Juiz de Fora/MG.');
+          raise EEmissionError.Create('Perfil inicial limitado a Juiz de Fora/MG.');
         if S(Settings,'tax_regime') <> 'simples_nacional' then raise EEmissionError.Create('Fluxo atual preparado somente para ME/EPP do Simples Nacional.');
         CheckDigits(S(CompanyData,'document'),14);
         CheckDigits(S(Settings,'service_code'),6);
@@ -166,7 +212,8 @@ begin
         NFSe.Configuracoes.Geral.SSLXmlSignLib := xsLibXml2;
         NFSe.Configuracoes.Geral.SSLHttpLib := httpOpenSSL;
         NFSe.Configuracoes.Geral.LayoutNFSe := lnfsPadraoNacionalv101;
-        NFSe.Configuracoes.WebServices.Ambiente := taHomologacao;
+        if Production then NFSe.Configuracoes.WebServices.Ambiente := taProducao
+        else NFSe.Configuracoes.WebServices.Ambiente := taHomologacao;
         NFSe.Configuracoes.WebServices.TimeOut := 30000;
         NFSe.Configuracoes.Geral.ConsultaLoteAposEnvio := False;
         NFSe.Configuracoes.Geral.MontarPathSchema := False;
@@ -180,12 +227,17 @@ begin
         NFSe.Configuracoes.Arquivos.PathCan := AttemptDir;
         TFile.WriteAllText(TPath.Combine(AttemptDir,'servicos.ini'),'[PadraoNacional]' + sLineBreak +
           'Versao=1.01' + sLineBreak + 'HomRecepcionar='+BaseURL+sLineBreak+
-          'HomGerarNFSe='+BaseURL+sLineBreak,TEncoding.ASCII);
+          'HomGerarNFSe='+BaseURL+sLineBreak+'ProRecepcionar='+BaseURL+sLineBreak+
+          'ProGerarNFSe='+BaseURL+sLineBreak,TEncoding.ASCII);
         NFSe.Configuracoes.Arquivos.IniServicos := TPath.Combine(AttemptDir,'servicos.ini');
         NFSe.Configuracoes.WebServices.LerParams;
         NFSe.Configuracoes.Geral.CodigoMunicipio := StrToInt(S(Profile,'municipality_code'));
         NFSe.SetProvedor(proPadraoNacional,ve101);
-        if NFSe.Provider.ConfigWebServices.Homologacao.GerarNFSe <> BaseURL then raise EEmissionError.Create('URL de homologacao incorreta.');
+        if Production then
+        begin
+          if NFSe.Provider.ConfigWebServices.Producao.GerarNFSe<>BaseURL then raise EEmissionError.Create('URL de producao incorreta.');
+        end
+        else if NFSe.Provider.ConfigWebServices.Homologacao.GerarNFSe <> BaseURL then raise EEmissionError.Create('URL de homologacao incorreta.');
         NFSe.SSL.ArquivoPFX := CertificatePath;
         NFSe.SSL.Senha := AnsiString(UTF8String(Password));
         Password := '';
@@ -280,7 +332,17 @@ begin
         if NFSe.WebService.Emite.Sucesso and (Length(NFSe.WebService.Emite.Link)=50) and (Errors.Count=0) and (NFSe.NotasFiscais.Count>0) then
         begin
           InvoiceXml := NFSe.NotasFiscais[0].XmlNfse;
-          if InvoiceXml<>'' then State:='authorized';
+          if InvoiceXml<>'' then
+          begin
+            if Production then
+            begin
+              if not NFSe.SSL.Validar(InvoiceXml,TPath.Combine(SchemaRoot,'NFSe_v1.01.xsd'),ErrorText) then
+                raise EEmissionError.Create('Resposta de producao fora do esquema. Consulte a tentativa antes de nova emissao.');
+              if not NFSe.SSL.VerificarAssinatura(InvoiceXml,ErrorText,'infNFSe','','','','Id') then
+                raise EEmissionError.Create('Assinatura da NFS-e nao confirmada. Consulte a tentativa antes de nova emissao.');
+            end;
+            State:='authorized';
+          end;
         end
         else if (ResponseText<>'') and (Errors.Count>0) then
         begin
@@ -322,12 +384,14 @@ begin
       Q.ExecSQL;
       if State='authorized' then
       begin
-        Execute('select import_homologation_invoice(cast(:company as uuid),cast(:draft as uuid),:xml)->>''id''');
+        Execute('select import_invoice(cast(:company as uuid),cast(:draft as uuid),:xml,:environment)->>''id''');
+        Q.ParamByName('environment').AsWideString:=Environment;
         Q.ParamByName('draft').AsWideString:=Draft;
         Q.ParamByName('xml').AsWideMemo:=InvoiceXml;
         Q.Open;
         Xml:=Q.Fields[0].AsString;
-        Execute('update invoices set status=''authorized_homologation'',source=''sefin_api'' where id=cast(:invoice as uuid) and company_id=cast(:company as uuid)');
+        Execute('update invoices set status=:status,source=''sefin_api'' where id=cast(:invoice as uuid) and company_id=cast(:company as uuid)');
+        Q.ParamByName('status').AsWideString:=InvoiceStatus;
         Q.ParamByName('invoice').AsWideString:=Xml;
         Q.ExecSQL;
         Execute('update emission_attempts set invoice_id=cast(:invoice as uuid) where id=cast(:id as uuid) and company_id=cast(:company as uuid)');
@@ -337,7 +401,16 @@ begin
       Conn.Commit;
     except
       Conn.Rollback;
-      raise;
+      // A resposta chegou, mas a persistencia/validacao nao foi concluida: nunca reenviar.
+      State:='unknown';
+      Report.RemovePair('status').Free;
+      Report.AddPair('status',State);
+      Report.AddPair('persistence_error','Autorizacao ainda nao conciliada. Consulte a tentativa antes de outra emissao.');
+      Execute('update emission_attempts set status=''unknown'',result=cast(:result as jsonb),invoice_xml=:xml,response_text=:response,updated_at=now() '+
+        'where id=cast(:id as uuid) and company_id=cast(:company as uuid)');
+      Q.ParamByName('result').AsWideMemo:=Report.ToJSON; Q.ParamByName('xml').AsWideMemo:=InvoiceXml;
+      Q.ParamByName('response').AsWideMemo:=ResponseText; Q.ExecSQL;
+      TFile.WriteAllText(TPath.Combine(AttemptDir,'resultado.json'),Report.ToJSON,TEncoding.UTF8);
     end;
     Execute('select (to_jsonb(a)-''signed_dps''-''invoice_xml''-''response_text'')::text from emission_attempts a where id=cast(:id as uuid) and company_id=cast(:company as uuid)');
     Q.Open;
@@ -365,11 +438,11 @@ begin
   Q := TFDQuery.Create(nil);
   try
     Q.Connection := Conn;
-    Q.SQL.Text := 'select access_key,issuer_document,xml_content from invoices where id=cast(:invoice as uuid) and company_id=cast(:company as uuid) and environment=''homologacao''';
+    Q.SQL.Text := 'select access_key,issuer_document,xml_content from invoices where id=cast(:invoice as uuid) and company_id=cast(:company as uuid)';
     Q.ParamByName('invoice').AsWideString := Invoice;
     Q.ParamByName('company').AsWideString := Company;
     Q.Open;
-    if Q.IsEmpty then raise EEmissionError.Create('Nota de homologacao nao encontrada nesta empresa.');
+    if Q.IsEmpty then raise EEmissionError.Create('Nota nao encontrada nesta empresa.');
     Key := Q.Fields[0].AsString;
     Document := Q.Fields[1].AsString;
     InputXml := Q.Fields[2].AsString;
@@ -402,7 +475,7 @@ begin
     Waited := waitpid(Child,@ExitStatus,0);
   until (Waited<>-1) or (errno<>EINTR);
   if (Waited<>Child) or not WIFEXITED(ExitStatus) or (WEXITSTATUS(ExitStatus)<>0) then
-    raise EEmissionError.Create('Falha ou tempo limite ao gerar DANFSe de homologacao. Consulte renderer-error.txt no volume privado. Nenhuma nota foi emitida.');
+    raise EEmissionError.Create('Falha ou tempo limite ao gerar DANFSe. Consulte renderer-error.txt no volume privado. Esta consulta nao emite notas.');
   {$ELSE}
   raise EEmissionError.Create('Download oficial do DANFSe disponivel no servidor Linux.');
   {$ENDIF}

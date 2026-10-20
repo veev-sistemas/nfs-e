@@ -9,6 +9,7 @@ WORKDIR /app
 COPY NfseBackend /app/NfseBackend
 RUN chmod 755 /app/NfseBackend
 COPY schemas /app/schemas
+COPY schemas-production /app/schemas-production
 COPY openssl-pfx.cnf /app/openssl-pfx.cnf
 COPY download-danfse.sh /app/download-danfse.sh
 COPY render-danfse.py /app/render-danfse.py
@@ -20,6 +21,8 @@ RUN mkdir -p /var/lib/nfse/certificados /run/nfse-certificates \
 USER 10001:10001
 ENV NFSE_BIND=0.0.0.0 NFSE_PORT=9000
 ENV NFSE_ENABLE_HOMOLOGATION=0 NFSE_SCHEMAS_DIR=/app/schemas NFSE_DATA_DIR=/var/lib/nfse NFSE_CERTIFICATES_DIR=/var/lib/nfse/certificados
+ENV NFSE_ENABLE_PRODUCTION=0 NFSE_PRODUCTION_ALLOWED_CNPJ=
+ENV NFSE_PRODUCTION_SCHEMAS_DIR=/app/schemas-production
 ENV OPENSSL_CONF=/app/openssl-pfx.cnf OPENSSL_MODULES=/usr/lib/x86_64-linux-gnu/ossl-modules
 EXPOSE 9000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
