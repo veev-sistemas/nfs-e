@@ -27,6 +27,7 @@ assert request(path,'PATCH',{'enabled':'true','series':'901'},admin)[0]==422
 assert request(path,'PATCH',{'enabled':True,'series':'901'},admin)[0]==200 # synthetic cert installed by prior test
 config=request('/v1/emission-config',token=tenant)[1]
 assert config['production_enabled'] and config['production_available'] is False and config['server_enabled'] is False
+assert request('/v1/admin/companies/'+company+'/environment','PATCH',{'environment':'producao'},admin)[0]==200
 status,draft=request('/v1/drafts','POST',{'environment':'producao','amount_cents':10000},tenant)
 assert status==201,(status,draft)
 assert draft['environment']=='producao'

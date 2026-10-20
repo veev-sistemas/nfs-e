@@ -15,7 +15,7 @@ UPSTREAM = 'https://nfse-nfse-api.0piict.easypanel.host'
 COMPANY = {'id':'11111111-1111-4111-8111-111111111111','name':'EMPRESA DEMONSTRAÇÃO LTDA','document':'12345678000199'}
 SETTINGS = {'tax_regime':'simples_nacional','service_code':'090103','municipal_service_code':'002','nbs_code':'103031100','approx_simples_percent':13.46,'service_description':'TESTE DE HOMOLOGAÇÃO - Serviço demonstrativo'}
 now = lambda: datetime.now(timezone.utc).isoformat()
-INVOICES = [{'id':str(uuid.uuid4()),'draft_id':None,'environment':'homologacao','access_key':'3'*50,'invoice_number':'2','issuer_document':COMPANY['document'],'amount_cents':10000,'status':'authorized_homologation','source':'sefin_api','imported_at':now()}]
+INVOICES = [{'id':str(uuid.uuid4()),'draft_id':None,'environment':'homologacao','access_key':'3'*50,'customer_name':'TOMADOR DEMONSTRAÇÃO','invoice_number':'2','issuer_document':COMPANY['document'],'amount_cents':10000,'status':'authorized_homologation','source':'sefin_api','imported_at':now()}]
 DRAFTS = [{'id':str(uuid.uuid4()),'customer_id':None,'amount_cents':25000,'settings':dict(SETTINGS),'status':'draft','created_at':now(),'attempt_id':None,'attempt_status':None}]
 DRAFTS.append(dict(DRAFTS[0],id=str(uuid.uuid4()),environment='producao',settings=dict(SETTINGS,service_description='SIMULACAO VISUAL - SEM TRANSMISSAO')))
 CUSTOMERS = [{'id':str(uuid.uuid4()),'name':'Cliente de demonstração','document':'11111111111'}]
@@ -91,7 +91,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.respond(401,{'error':'Sessão inválida.'})
             return
         if path == '/auth/me': self.respond(200,COMPANY)
-        elif path == '/emission-config': self.respond(200,{'production_available':True,'production_enabled':True})
+        elif path == '/emission-config': self.respond(200,{'production_available':True,'production_enabled':True,'active_environment':'homologacao'})
         elif path == '/auth/logout':
             TOKENS.discard(auth)
             self.respond(200,{'status':'ok'})
@@ -134,9 +134,13 @@ class Handler(SimpleHTTPRequestHandler):
             filtered=[]
             for note in INVOICES:
                 if query.get('environment') and note['environment']!=query['environment'][0]: continue
+                status=query.get('status',[''])[0]
+                if status and status!=note['status'] and not (status=='authorized' and note['status'].startswith('authorized_')): continue
                 day=datetime.fromisoformat(note.get('issued_at') or note['imported_at']).astimezone(ZoneInfo('America/Sao_Paulo')).date().isoformat()
                 if (not date_from or day>=date_from) and (not date_to or day<=date_to): filtered.append(note)
             self.respond(200,filtered)
+        elif path.endswith('/cancel'):
+            self.respond(422,{'error':'Cancelamento real indisponível na demonstração. Nenhuma transmissão.'})
         elif path.endswith('/xml'): self.respond(200,b'<?xml version="1.0"?><demo>Documento ficticio de QA</demo>','application/xml')
         elif path.endswith('/pdf'):
             self.respond(502,{'error':'Download de PDF real disponível somente com o backend; prévia fictícia.'})

@@ -185,6 +185,19 @@ begin
         CompanyId:=Parts[4]; Action:=Parts[5];
         try Guid:=StringToGUID('{'+CompanyId+'}');
         except on E:EConvertError do raise EAdminError.Create(422,'Empresa invalida.'); end;
+        if (Action='environment') and (Method='PATCH') then
+        begin
+          ReadBody; Environment:=ReadText(Body,'environment',20);
+          if (Environment<>'homologacao') and (Environment<>'producao') then raise EAdminError.Create(422,'Ambiente invalido.');
+          Conn.StartTransaction;
+          SQL('select id from companies where id=cast(:company as uuid) for update'); Q.Open;
+          if Q.IsEmpty then raise EAdminError.Create(404,'Empresa nao encontrada.'); Q.Close;
+          SQL('insert into company_emission_config(company_id,active_environment) values(cast(:company as uuid),:environment) '+
+            'on conflict(company_id) do update set active_environment=excluded.active_environment');
+          Q.ParamByName('environment').AsWideString:=Environment; Q.ExecSQL;
+          Audit('environment_'+Environment); Conn.Commit;
+          Response.Content:='{"status":"ok"}'; Exit;
+        end;
         if (Action='production') and (Method='GET') then
         begin Response.Content:=EmissionConfig(Conn,CompanyId); Exit; end;
         if (Action='production') and (Method='PATCH') then

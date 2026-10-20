@@ -138,6 +138,7 @@ begin
   THorse.Post('/v1/admin/companies/:id/certificate', Handle);
   THorse.Get('/v1/admin/companies/:id/production', Handle);
   THorse.Patch('/v1/admin/companies/:id/production', Handle);
+  THorse.Patch('/v1/admin/companies/:id/environment', Handle);
   THorse.Post('/v1/auth/login', Handle);
   THorse.Post('/v1/auth/logout', Handle);
   THorse.Get('/v1/auth/me', Handle);
@@ -150,6 +151,9 @@ begin
   THorse.Get('/v1/invoices/:id', Handle);
   THorse.Get('/v1/invoices/:id/xml', Handle);
   THorse.Get('/v1/invoices/:id/pdf', Handle);
+  THorse.Post('/v1/invoices/:id/cancel', Handle);
+  THorse.Get('/v1/invoices/:id/cancellation', Handle);
+  THorse.Get('/v1/invoices/:id/cancellation/xml', Handle);
   THorse.Post('/v1/drafts/:id/emit-homologation', Handle);
   THorse.Post('/v1/drafts/:id/emit-production', Handle);
   THorse.Get('/v1/emission-attempts/:id', Handle);
@@ -191,7 +195,7 @@ var
   Amount: Int64;
   Guid: TGUID;
   InvoiceId, DraftId, InvoiceXml: string;
-  IssuedAt, Competence, DateFrom, DateTo, Environment: string;
+  IssuedAt, Competence, DateFrom, DateTo, Environment, StatusFilter: string;
   ParsedDate: TDateTime;
   PdfBytes: TBytes;
 
@@ -338,6 +342,8 @@ begin
         Environment:='homologacao';
         if Body.GetValue('environment')<>nil then Environment:=RequiredString(Body,'environment');
         if (Environment<>'homologacao') and (Environment<>'producao') then raise EApiError.Create(422,'Ambiente invalido.');
+        Run('select coalesce((select active_environment from company_emission_config where company_id=cast(:company as uuid)),''homologacao'')'); Q.Open;
+        if Q.Fields[0].AsString<>Environment then raise EApiError.Create(422,'O ambiente foi definido pelo administrador. Atualize a tela.'); Q.Close;
         Customer := '';
         V := Body.GetValue('customer_id');
         if (V <> nil) and not (V is TJSONNull) then
@@ -420,6 +426,8 @@ begin
           if not (Body.GetValue('confirm_production') is TJSONTrue) then
             raise EApiError.Create(422,'Confirme explicitamente a emissao com validade fiscal.');
         end;
+        Run('select coalesce((select active_environment from company_emission_config where company_id=cast(:company as uuid)),''homologacao'')'); Q.Open;
+        if Q.Fields[0].AsString<>Environment then raise EApiError.Create(422,'O ambiente foi definido pelo administrador. Atualize a tela.'); Q.Close;
         Response.Content:=EmitInvoice(Conn,Company,DraftId,IssuedAt,Competence,Environment);
       end
       else if (Copy(Route,1,22)='/v1/emission-attempts/') and (Method='GET') then
@@ -461,6 +469,9 @@ begin
       end
       else if (Route = '/v1/invoices') and (Method = 'GET') then
       begin
+        StatusFilter:=Request.QueryFields.Values['status'];
+        if (StatusFilter<>'') and (StatusFilter<>'authorized') and (StatusFilter<>'cancelled') and (StatusFilter<>'imported') then
+          raise EApiError.Create(422,'Situacao invalida.');
         DateFrom:=Request.QueryFields.Values['date_from'];
         DateTo:=Request.QueryFields.Values['date_to'];
         Environment:=Request.QueryFields.Values['environment'];
@@ -475,17 +486,36 @@ begin
         if (DateFrom<>'') and (DateTo<>'') and (DateFrom>DateTo) then
           raise EApiError.Create(422,'A data inicial deve ser anterior ou igual a data final.');
         Run('select coalesce(jsonb_agg(to_jsonb(i)), ''[]''::jsonb)::text from ' +
-          '(select id, draft_id, environment, access_key, invoice_number, issuer_document, ' +
-          'amount_cents, status, source, imported_at, issued_at from invoices ' +
-          'where company_id=cast(:company as uuid) '+
-          'and (:environment='''' or environment=:environment) '+
+          '(select i.id, i.draft_id, i.environment, i.access_key, i.invoice_number, i.issuer_document, ' +
+          'i.amount_cents, i.status, i.source, i.imported_at, i.issued_at, '+
+          '(select a.status from cancellation_attempts a where a.invoice_id=i.id and a.company_id=i.company_id order by a.created_at desc,a.id desc limit 1) as cancellation_status, '+
+          'coalesce(nullif(x.customer_name,''''),c.name) as customer_name '+
+          'from invoices i left join drafts d on d.id=i.draft_id and d.company_id=i.company_id '+
+          'left join customers c on c.id=d.customer_id and c.company_id=i.company_id ' +
+          'left join XMLTABLE(XMLNAMESPACES(''http://www.sped.fazenda.gov.br/nfse'' AS n),''/n:NFSe/n:infNFSe'' '+
+          'PASSING xmlparse(document i.xml_content) COLUMNS customer_name text PATH ''n:DPS/n:infDPS/n:toma/n:xNome'') x on true '+
+          'where i.company_id=cast(:company as uuid) '+
+          'and (:status='''' or i.status=:status or (:status=''authorized'' and i.status in (''authorized_homologation'',''authorized_production''))) '+
+          'and (:environment='''' or i.environment=:environment) '+
           'and (:date_from='''' or issued_at >= (cast(nullif(:date_from,'''') as date)::timestamp at time zone ''America/Sao_Paulo'')) '+
           'and (:date_to='''' or issued_at < ((cast(nullif(:date_to,'''') as date)+1)::timestamp at time zone ''America/Sao_Paulo'')) '+
-          'order by issued_at desc, id limit 100) i');
+          'order by i.issued_at desc, i.id limit 100) i');
+        Q.ParamByName('status').AsWideString:=StatusFilter;
         Q.ParamByName('date_from').AsWideString:=DateFrom;
         Q.ParamByName('date_to').AsWideString:=DateTo;
         Q.ParamByName('environment').AsWideString:=Environment;
         ReturnQuery;
+      end
+      else if (Copy(Route,1,13)='/v1/invoices/') and (Method='POST') then
+      begin
+        InvoiceId:=Req.Params['id'];
+        try Guid:=StringToGUID('{'+InvoiceId+'}');
+        except on E:EConvertError do raise EApiError.Create(422,'Identificador da nota invalido.'); end;
+        Body:=ParseBody(Request);
+        if not (Body.GetValue('confirm_cancellation') is TJSONTrue) then raise EApiError.Create(422,'Confirme explicitamente o cancelamento.');
+        Customer:=RequiredString(Body,'reason_code');
+        if (Customer<>'1') and (Customer<>'2') and (Customer<>'9') then raise EApiError.Create(422,'Motivo invalido.');
+        Response.Content:=CancelInvoice(Conn,Company,InvoiceId,RequiredString(Body,'reason'),StrToInt(Customer));
       end
       else if (Copy(Route, 1, 13) = '/v1/invoices/') and (Method = 'GET') then
       begin
@@ -495,12 +525,27 @@ begin
         except
           on E: EConvertError do raise EApiError.Create(422, 'Identificador da nota invalido.');
         end;
+        if (Route='/v1/invoices/'+InvoiceId+'/cancellation') or (Route='/v1/invoices/'+InvoiceId+'/cancellation/xml') then
+        begin
+          Run('select (to_jsonb(a)-''event_xml'')::text,event_xml from cancellation_attempts a where company_id=cast(:company as uuid) and invoice_id=cast(:id as uuid) order by created_at desc,id desc limit 1');
+          Q.ParamByName('id').AsWideString:=InvoiceId; Q.Open;
+          if Q.IsEmpty then raise EApiError.Create(404,'Nenhuma tentativa de cancelamento.');
+          if Route='/v1/invoices/'+InvoiceId+'/cancellation/xml' then
+          begin
+            if Q.Fields[1].IsNull then raise EApiError.Create(404,'Evento confirmado indisponivel.');
+            Response.ContentType:='application/xml; charset=utf-8'; Response.Content:=Q.Fields[1].AsString;
+            Response.SetCustomHeader('Content-Disposition','attachment; filename="cancelamento-'+InvoiceId+'.xml"');
+          end
+          else Response.Content:=Q.Fields[0].AsString;
+          Exit;
+        end;
         if Route = '/v1/invoices/' + InvoiceId + '/pdf' then
         begin
-          Run('select id,environment from invoices where id=cast(:id as uuid) and company_id=cast(:company as uuid)');
+          Run('select id,environment,status from invoices where id=cast(:id as uuid) and company_id=cast(:company as uuid)');
           Q.ParamByName('id').AsWideString := InvoiceId;
           Q.Open;
           if Q.IsEmpty then raise EApiError.Create(404,'Nota nao encontrada.');
+          if Q.FieldByName('status').AsString='cancelled' then raise EApiError.Create(422,'Nota cancelada. Consulte o evento de cancelamento.');
           Environment:=Q.FieldByName('environment').AsString;
           Q.Close;
           try

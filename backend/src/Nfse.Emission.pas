@@ -9,6 +9,7 @@ type
 
 function EmitInvoice(Conn: TFDConnection; const Company, Draft, IssuedAt, Competence, Environment: string): string;
 function EmissionConfig(Conn: TFDConnection; const Company: string): string;
+function CancelInvoice(Conn: TFDConnection; const Company, Invoice, Reason: string; Code: Integer): string;
 function DownloadDanfse(Conn: TFDConnection; const Company, Invoice: string): TBytes;
 
 implementation
@@ -16,7 +17,7 @@ implementation
 uses
   System.Classes, System.IOUtils, System.DateUtils, System.SyncObjs, Nfse.Certificates,
   ACBrNFSeX, ACBrDFeSSL, ACBrDFe.Conversao, ACBrNFSeXConversao,
-  ACBrNFSeXNotasFiscais
+  ACBrNFSeXNotasFiscais, ACBrNFSeXWebserviceBase
   {$IFDEF LINUX}, Posix.Unistd, Posix.SysWait, Posix.Errno{$ENDIF};
 
 {$IFDEF LINUX}
@@ -58,7 +59,7 @@ begin
   try
     Q.Connection:=Conn;
     Q.SQL.Text:='select jsonb_build_object(''production_enabled'',coalesce(e.production_enabled,false),'+
-      '''production_series'',e.production_series,''server_enabled'',cast(:server as boolean),''pilot_allowed'',c.document=:pilot,'+
+      '''active_environment'',coalesce(e.active_environment,''homologacao''),''production_series'',e.production_series,''server_enabled'',cast(:server as boolean),''pilot_allowed'',c.document=:pilot,'+
       '''fonts_ready'',cast(:fonts as boolean),''production_available'',coalesce(e.production_enabled,false) '+
       'and cast(:server as boolean) and c.document=:pilot and cast(:fonts as boolean) and exists(select 1 from dps_sequences s '+
       'where s.company_id=c.id and s.environment=''producao'' and s.series=e.production_series))::text '+
@@ -422,6 +423,8 @@ begin
     Q.Free;
   end;
 end;
+
+{$I Nfse.Cancellation.inc}
 
 function DownloadDanfse(Conn: TFDConnection; const Company, Invoice: string): TBytes;
 var

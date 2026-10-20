@@ -80,6 +80,8 @@ function renderCompanies() {
     certificate.onclick=()=>certificateForm(list[index]);row.querySelector('.actions').append(certificate);
     const production=document.createElement('button');production.className='text-button';production.textContent='Produção';
     production.onclick=()=>productionForm(list[index]);row.querySelector('.actions').append(production);
+    const environment=document.createElement('button');environment.className='text-button';environment.textContent='Ambiente';
+    environment.onclick=()=>environmentForm(list[index]);row.querySelector('.actions').append(environment);
   });
 }
 
@@ -214,3 +216,12 @@ function passwordForm(company) {
 
 dialog.addEventListener('close',()=>{dialog.querySelectorAll('input[name=password],input[type=file]').forEach(input=>input.value='');});
 login();
+
+async function environmentForm(company) {
+  try{
+    const config=await api('/companies/'+company.id+'/production');
+    dialog.innerHTML=`<h2 id="admin-dialog-title">Ambiente da empresa</h2><p>${esc(company.name)}</p><p class="subtle">O cliente verá o ambiente escolhido, sem poder alterá-lo. A seleção de produção não libera a emissão: certificado, numeração e liberação continuam obrigatórios.</p><form><label class="field">Ambiente<select name="environment"><option value="homologacao" ${config.active_environment!=='producao'?'selected':''}>Homologação</option><option value="producao" ${config.active_environment==='producao'?'selected':''}>Produção</option></select></label><p class="error" role="alert"></p><div class="actions"><button class="secondary" type="button" data-close>Voltar</button><button class="primary" type="submit">Salvar ambiente</button></div></form>`;
+    dialog.showModal();const form=dialog.querySelector('form');form.querySelector('[data-close]').onclick=()=>dialog.close();
+    form.onsubmit=async event=>{event.preventDefault();const button=form.querySelector('[type=submit]');button.disabled=true;try{await api('/companies/'+company.id+'/environment',{method:'PATCH',body:{environment:form.elements.environment.value}});dialog.close();notice('Ambiente da empresa atualizado.');}catch(error){form.querySelector('.error').textContent=error.message;}finally{if(button.isConnected)button.disabled=false;}};
+  }catch(error){notice(error.message);}
+}

@@ -15,6 +15,7 @@ GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO nfse_access_runner;
 GRANT EXECUTE ON FUNCTION login_company(text,text) TO nfse_access_runner;
 GRANT EXECUTE ON FUNCTION login_admin(text,text) TO nfse_access_runner;
 GRANT EXECUTE ON FUNCTION set_company_password(uuid,text),set_company_access(uuid,boolean) TO nfse_access_runner;
+GRANT EXECUTE ON FUNCTION reserve_cancellation(uuid,uuid,integer,text),finish_cancellation(uuid,uuid,text,jsonb,text) TO nfse_access_runner;
 TRUNCATE admin_users CASCADE;
 SELECT set_admin_password('regression-admin','Admin-regression-2026');
 TRUNCATE companies CASCADE;
@@ -38,6 +39,7 @@ python3 "$root/tests/access-http-regression.py"
 python3 "$root/tests/admin-and-filters-regression.py"
 python3 "$root/tests/numbering-and-certificates-http.py"
 python3 "$root/tests/production-regression.py"
+python3 "$root/tests/environment-cancellation-regression.py"
 if [[ "${NFSE_QA_KEEP_ALIVE:-0}" == "1" ]]; then
   runuser -u postgres -- psql -v ON_ERROR_STOP=1 -d nfse_access_test -c "UPDATE admin_users SET enabled=true,failed_attempts=0,locked_until=NULL WHERE username='regression-admin'" >/dev/null
   echo 'QA local pronta em 127.0.0.1:19002; finalizar este processo encerra a API.'

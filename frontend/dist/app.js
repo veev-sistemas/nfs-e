@@ -10,8 +10,8 @@ let data = { invoices: [], drafts: [], customers: [], settings: {} };
 let generation = 0;
 let toastTimer;
 let sending = false;
-let invoiceFilters = {from:'',to:'',search:''};
-const invoicePath = () => '/invoices?' + new URLSearchParams({date_from:invoiceFilters.from,date_to:invoiceFilters.to,environment});
+let invoiceFilters = {from:'',to:'',search:'',status:''};
+const invoicePath = () => '/invoices?' + new URLSearchParams({date_from:invoiceFilters.from,date_to:invoiceFilters.to,status:invoiceFilters.status,environment});
 const labels = { overview: 'Visão geral', new: 'Nova NFS-e', invoices: 'Notas fiscais', drafts: 'Rascunhos', customers: 'Tomadores', settings: 'Configurações' };
 const paths = {
   overview:'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',
@@ -29,7 +29,7 @@ const doc = value => String(value || '').replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(
 const brand = () => '<div class="brand"><span class="brand-mark">∨∨</span><div>VEEV<small>NOTAS DE SERVIÇO</small></div></div>';
 const empty = (title, text) => `<div class="empty">${icon('invoices')}<strong>${esc(title)}</strong>${esc(text)}</div>`;
 const badge = status => {
-  const map = {authorized_production:['Autorizada',''],authorized_homologation:['Autorizada',''],imported:['Importada','neutral'],authorized:['Autorizada',''],draft:['Rascunho','neutral'],reserved:['Reservada','warn'],prepared:['Preparada','warn'],sending:['Em processamento','warn'],unknown:['Resultado inconclusivo','warn'],local_error:['Falha na preparação','bad'],rejected:['Rejeitada','bad']};
+  const map = {cancelled:['Cancelada','bad'],authorized_production:['Autorizada',''],authorized_homologation:['Autorizada',''],imported:['Importada','neutral'],authorized:['Autorizada',''],draft:['Rascunho','neutral'],reserved:['Reservada','warn'],prepared:['Preparada','warn'],sending:['Em processamento','warn'],unknown:['Resultado inconclusivo','warn'],local_error:['Falha na preparação','bad'],rejected:['Rejeitada','bad']};
   const [text, type] = map[status] || [status || 'Pendente','neutral'];
   return `<span class="badge ${type}">${esc(text)}</span>`;
 };
@@ -75,7 +75,7 @@ function clearSession() {
   company = null;
   environment='homologacao'; emissionConfig={production_available:false};
   data = {invoices:[],drafts:[],customers:[],settings:{}};
-  invoiceFilters = {from:'',to:'',search:''};
+  invoiceFilters = {from:'',to:'',search:'',status:''};
   generation++;
   if (dialog.open) dialog.close();
 }
@@ -116,9 +116,8 @@ function renderLogin(error = '') {
 }
 
 function renderShell() {
-  app.innerHTML = `<div class="shell"><aside class="sidebar">${brand()}<div class="nav-label">ÁREA DA EMPRESA</div><nav class="nav" aria-label="Menu principal">${Object.entries(labels).map(([key,label]) => `<button data-page="${key}" class="${page === key ? 'active' : ''}">${icon(key)}${label}</button>`).join('')}</nav><div class="sidebar-foot"><label class="field">Ambiente<select id="environment-select"><option value="homologacao" ${environment==='homologacao'?'selected':''}>Homologação</option><option value="producao" ${environment==='producao'?'selected':''}>Produção</option></select></label><p>${envHint(environment)}</p></div></aside><div class="workspace"><header class="topbar"><div class="breadcrumb">NFS-e Nacional &nbsp; / &nbsp; <strong id="breadcrumb">${labels[page]}</strong></div><div class="company"><span class="avatar">${esc(company.name.slice(0,2).toUpperCase())}</span><div><div class="company-name">${esc(company.name)}</div><div class="company-doc">${esc(doc(company.document))}</div></div><button class="text-button" id="logout" title="Sair da conta">${icon('logout')} Sair</button></div></header><main class="content" id="content"><div class="loading">Carregando seus dados…</div></main></div></div>`;
+  app.innerHTML = `<div class="shell"><aside class="sidebar">${brand()}<div class="nav-label">ÁREA DA EMPRESA</div><nav class="nav" aria-label="Menu principal">${Object.entries(labels).map(([key,label]) => `<button data-page="${key}" class="${page === key ? 'active' : ''}">${icon(key)}${label}</button>`).join('')}</nav><div class="sidebar-foot"><div class="field">Ambiente<strong id="active-environment">${envLabel(environment)}</strong><small>Definido pelo administrador</small></div><p>${envHint(environment)}</p></div></aside><div class="workspace"><header class="topbar"><div class="breadcrumb">NFS-e Nacional &nbsp; / &nbsp; <strong id="breadcrumb">${labels[page]}</strong></div><div class="company"><span class="avatar">${esc(company.name.slice(0,2).toUpperCase())}</span><div><div class="company-name">${esc(company.name)}</div><div class="company-doc">${esc(doc(company.document))}</div></div><button class="text-button" id="logout" title="Sair da conta">${icon('logout')} Sair</button></div></header><main class="content" id="content"><div class="loading">Carregando seus dados…</div></main></div></div>`;
   document.querySelectorAll('[data-page]').forEach(button => button.onclick = () => navigate(button.dataset.page));
-  document.querySelector('#environment-select').onchange=event=>{environment=event.target.value;renderShell();load();};
   document.querySelector('#logout').onclick = async () => {
     try { await api('/auth/logout', {method:'POST'}); }
     catch (error) { notice(error.message); }
@@ -129,7 +128,11 @@ function renderShell() {
 async function load() {
   const current = ++generation;
   try {
-    const [settings, customers, drafts, invoices, config] = await Promise.all(['/settings','/customers','/drafts?environment='+environment,invoicePath(),'/emission-config'].map(path => api(path)));
+    const config=await api('/emission-config');
+    if (!company || current !== generation) return;
+    const active=config.active_environment||'homologacao';
+    if(environment!==active){environment=active;invoiceFilters={from:'',to:'',search:'',status:''};renderShell();}
+    const [settings, customers, drafts, invoices] = await Promise.all(['/settings','/customers','/drafts?environment='+environment,invoicePath()].map(path => api(path)));
     if (!company || current !== generation) return;
     emissionConfig=config;
     data = {settings,customers,drafts:drafts.filter(d=>(d.environment||'homologacao')===environment),invoices};
@@ -159,7 +162,7 @@ function draftStatus(draft) {
 
 function invoiceTable(invoices) {
   if (!invoices.length) return empty('Nenhuma nota por aqui', 'As notas autorizadas aparecerão nesta lista.');
-  return `<div class="table-wrap"><table><thead><tr><th>Nota / emissão</th><th>Ambiente</th><th>Valor</th><th>Situação</th><th>Documentos</th></tr></thead><tbody>${invoices.map(note => `<tr><td><strong>NFS-e ${esc(note.invoice_number)}</strong><div class="minor">${esc(date(note.issued_at || note.imported_at))}</div></td><td>${envLabel(note.environment)}</td><td><strong>${money(note.amount_cents)}</strong></td><td>${badge(note.status)}</td><td><div class="actions"><button class="text-button" data-download="${esc(note.id)}" data-format="pdf">${icon('download')} DANFSe</button><button class="text-button" data-download="${esc(note.id)}" data-format="xml">XML</button><button class="text-button" data-note="${esc(note.id)}">Detalhes</button></div></td></tr>`).join('')}</tbody></table></div>`;
+  return `<div class="table-wrap"><table><thead><tr><th>Nota / emissão</th><th>Tomador</th><th>Ambiente</th><th>Valor</th><th>Situação</th><th>Documentos</th></tr></thead><tbody>${invoices.map(note => `<tr><td><strong>NFS-e ${esc(note.invoice_number)}</strong><div class="minor">${esc(date(note.issued_at || note.imported_at))}</div></td><td>${esc((note.customer_name||'Tomador não informado').toLocaleUpperCase('pt-BR'))}</td><td>${envLabel(note.environment)}</td><td><strong>${money(note.amount_cents)}</strong></td><td>${badge(note.status)}</td><td><div class="actions">${note.status!=='cancelled'?`<button class="text-button" data-download="${esc(note.id)}" data-format="pdf">${icon('download')} DANFSe</button>`:''}<button class="text-button" data-download="${esc(note.id)}" data-format="xml">XML</button><button class="text-button" data-note="${esc(note.id)}">Detalhes</button>${['authorized_production','authorized_homologation'].includes(note.status)&&note.source==='sefin_api'&&!['sending','unknown'].includes(note.cancellation_status)?`<button class="text-button" data-cancel="${esc(note.id)}">Cancelar NFS-e</button>`:''}${note.status==='cancelled'||['sending','unknown'].includes(note.cancellation_status)?`<button class="text-button" data-cancel-result="${esc(note.id)}">Consultar cancelamento</button>`:''}</div></td></tr>`).join('')}</tbody></table></div>`;
 }
 
 function renderPage() {
@@ -170,20 +173,20 @@ function renderPage() {
     content.innerHTML = title('Sua empresa, em dia.', 'Acompanhe suas notas e continue de onde parou.', newButton()) +
       `<div class="banner">${icon('shield')} ${envHint(environment)} ${environment==='producao'&&!emissionConfig.production_available?'A emissão está bloqueada. Consulte o administrador.':''}</div><div class="stats"><article class="stat"><span class="eyebrow">Notas disponíveis</span><span class="stat-icon">${icon('invoices')}</span><strong>${data.invoices.length}</strong><span class="subtle">Notas na consulta atual</span></article><article class="stat"><span class="eyebrow">Valor das notas</span><span class="stat-icon">${icon('check')}</span><strong>${money(data.invoices.reduce((sum,n) => sum + Number(n.amount_cents),0))}</strong><span class="subtle">${envLabel(environment)}</span></article><article class="stat"><span class="eyebrow">Rascunhos pendentes</span><span class="stat-icon">${icon('drafts')}</span><strong>${pending}</strong><span class="subtle">Prontos para revisar</span></article></div><section class="panel"><div class="panel-header"><div><h2>Últimas notas</h2><p>Documentos e informações em um só lugar.</p></div><button class="text-button" data-go="invoices">Ver todas ${icon('arrow')}</button></div>${invoiceTable(data.invoices.slice(0,5))}</section><p class="footer-note">Os indicadores consideram os últimos 100 registros retornados pelo sistema.</p>`;
   } else if (page === 'invoices') {
-    content.innerHTML = title('Notas fiscais','Consulte por data de emissão e baixe os documentos.', '<button class="secondary" id="refresh">Atualizar lista</button>') + `<section class="panel"><div class="panel-header"><div><h2>Suas NFS-e</h2><p>${data.invoices.length} notas no período consultado · ${envLabel(environment)}</p></div></div><form class="table-tools invoice-filters" id="invoice-filters"><label class="field">Emissão de<input type="date" name="from" value="${esc(invoiceFilters.from)}"></label><label class="field">Até<input type="date" name="to" value="${esc(invoiceFilters.to)}"></label><button class="primary" type="submit">Filtrar</button><button class="secondary" type="button" id="clear-filters">Limpar</button></form><div class="table-tools"><input class="search" id="invoice-search" type="search" value="${esc(invoiceFilters.search)}" placeholder="Buscar por número ou chave" aria-label="Buscar nota"></div><div id="invoice-list"></div></section><p class="footer-note">Até 100 notas por consulta. Datas de emissão no horário de Brasília; data final incluída.</p>`;
+    content.innerHTML = title('Notas fiscais','Consulte por data de emissão e baixe os documentos.', '<button class="secondary" id="refresh">Atualizar lista</button>') + `<section class="panel"><div class="panel-header"><div><h2>Suas NFS-e</h2><p>${data.invoices.length} notas no período consultado · ${envLabel(environment)}</p></div></div><form class="table-tools invoice-filters" id="invoice-filters"><label class="field">Emissão de<input type="date" name="from" value="${esc(invoiceFilters.from)}"></label><label class="field">Até<input type="date" name="to" value="${esc(invoiceFilters.to)}"></label><label class="field">Situação<select name="status">${[['','Todas'],['authorized','Autorizadas'],['cancelled','Canceladas'],['imported','Importadas']].map(([value,label])=>`<option value="${value}" ${invoiceFilters.status===value?'selected':''}>${label}</option>`).join('')}</select></label><button class="primary" type="submit">Filtrar</button><button class="secondary" type="button" id="clear-filters">Limpar</button></form><div class="table-tools"><input class="search" id="invoice-search" type="search" value="${esc(invoiceFilters.search)}" placeholder="Buscar por número, chave ou tomador" aria-label="Buscar nota"></div><div id="invoice-list"></div></section><p class="footer-note">Até 100 notas por consulta. Datas de emissão no horário de Brasília; data final incluída.</p>`;
     document.querySelector('#refresh').onclick = load;
     document.querySelector('#invoice-filters').onsubmit = async event => {
       event.preventDefault();
       const form = event.currentTarget;
       const from = form.elements.from.value, to = form.elements.to.value;
       if (from && to && from > to) { notice('A data inicial deve ser anterior ou igual à final.'); return; }
-      invoiceFilters.from = from; invoiceFilters.to = to;
+      invoiceFilters.from = from; invoiceFilters.to = to; invoiceFilters.status=event.currentTarget.elements.status.value;
       await load();
     };
-    document.querySelector('#clear-filters').onclick = () => { invoiceFilters = {from:'',to:'',search:''}; load(); };
+    document.querySelector('#clear-filters').onclick = () => { invoiceFilters = {from:'',to:'',search:'',status:''}; load(); };
     const filterList = () => {
       const term = invoiceFilters.search.toLowerCase();
-      document.querySelector('#invoice-list').innerHTML = invoiceTable(data.invoices.filter(i => String(i.invoice_number).includes(term) || i.access_key?.includes(term)));
+      document.querySelector('#invoice-list').innerHTML = invoiceTable(data.invoices.filter(i => String(i.invoice_number).includes(term) || i.access_key?.includes(term) || i.customer_name?.toLocaleLowerCase('pt-BR').includes(term)));
       bindDocuments();
     };
     document.querySelector('#invoice-search').oninput = event => { invoiceFilters.search = event.target.value; filterList(); };
@@ -355,13 +358,15 @@ function attemptResult(attempt) {
 }
 
 function showNote(note) {
-  dialog.innerHTML = `<h2 id="dialog-title">NFS-e ${esc(note.invoice_number)}</h2>${badge(note.status)}<dl class="details"><div><dt>VALOR DO SERVIÇO</dt><dd>${money(note.amount_cents)}</dd></div><div><dt>DISPONÍVEL DESDE</dt><dd>${esc(date(note.issued_at || note.imported_at))}</dd></div><div><dt>AMBIENTE</dt><dd>${envLabel(note.environment)}</dd></div><div><dt>PRESTADOR</dt><dd>${esc(doc(note.issuer_document))}</dd></div><div class="span2"><dt>CHAVE DE ACESSO</dt><dd>${esc(note.access_key)}</dd></div></dl><div class="hint">${envHint(note.environment)}</div><div class="actions"><button class="secondary" data-close>Fechar</button><button class="secondary" data-download="${esc(note.id)}" data-format="xml">Baixar XML</button><button class="primary" data-download="${esc(note.id)}" data-format="pdf">Baixar DANFSe</button></div>`;
+  dialog.innerHTML = `<h2 id="dialog-title">NFS-e ${esc(note.invoice_number)}</h2>${badge(note.status)}<dl class="details"><div><dt>VALOR DO SERVIÇO</dt><dd>${money(note.amount_cents)}</dd></div><div><dt>DISPONÍVEL DESDE</dt><dd>${esc(date(note.issued_at || note.imported_at))}</dd></div><div><dt>AMBIENTE</dt><dd>${envLabel(note.environment)}</dd></div><div><dt>PRESTADOR</dt><dd>${esc(doc(note.issuer_document))}</dd></div><div class="span2"><dt>CHAVE DE ACESSO</dt><dd>${esc(note.access_key)}</dd></div></dl><div class="hint">${envHint(note.environment)}</div><div class="actions"><button class="secondary" data-close>Fechar</button><button class="secondary" data-download="${esc(note.id)}" data-format="xml">Baixar XML</button>${note.status!=='cancelled'?`<button class="primary" data-download="${esc(note.id)}" data-format="pdf">Baixar DANFSe</button>`:`<button class="secondary" data-cancel-result="${esc(note.id)}">Ver cancelamento</button>`}</div>`;
   dialog.showModal();
   dialog.querySelector('[data-close]').onclick = () => dialog.close();
   bindDocuments();
 }
 
 function bindDocuments() {
+  document.querySelectorAll('[data-cancel]').forEach(button=>button.onclick=()=>cancelInvoice(data.invoices.find(n=>n.id===button.dataset.cancel)));
+  document.querySelectorAll('[data-cancel-result]').forEach(button=>button.onclick=()=>showCancellation(button.dataset.cancelResult));
   document.querySelectorAll('[data-note]').forEach(button => button.onclick = () => showNote(data.invoices.find(n => n.id === button.dataset.note)));
   document.querySelectorAll('[data-download]').forEach(button => button.onclick = async () => {
     button.disabled = true;
@@ -393,3 +398,28 @@ function bindCommon() {
 // Tokens remain in memory. Closing or refreshing this page requires a new login.
 window.addEventListener('pagehide', () => { token = null; });
 renderLogin();
+
+async function showCancellation(invoiceId, attempt) {
+  try {
+    attempt=attempt||await api(`/invoices/${invoiceId}/cancellation`);
+    const confirmed=attempt.status==='cancelled', rejected=attempt.status==='rejected';
+    dialog.innerHTML=`<h2 id="dialog-title">${confirmed?'NFS-e cancelada':rejected?'Cancelamento rejeitado':'Cancelamento sem confirmação'}</h2><p>${confirmed?'A SEFIN confirmou o cancelamento.':rejected?'A nota permanece autorizada. Confira o retorno antes de solicitar novamente.':'Não reenvie o pedido. Consulte esta tentativa antes de outra operação.'}</p><div class="status-box">${(attempt.result?.errors||[]).map(e=>`<p>${esc(e.code)} ${esc(e.description)}</p>`).join('')}${esc(attempt.result?.error||'')}</div><p class="subtle">Justificativa: ${esc(attempt.reason)}</p><p class="footer-note">Tentativa: ${esc(attempt.id)}</p><div class="actions"><button class="secondary" data-close>Fechar</button>${confirmed?'<button class="primary" id="cancel-event">Baixar evento XML</button>':'<button class="secondary" id="cancel-check">Consultar novamente</button>'}</div>`;
+    if(!dialog.open)dialog.showModal();dialog.querySelector('[data-close]').onclick=()=>dialog.close();
+    const check=dialog.querySelector('#cancel-check');if(check)check.onclick=()=>showCancellation(invoiceId);
+    const download=dialog.querySelector('#cancel-event');if(download)download.onclick=async()=>{
+      try{const blob=await api(`/invoices/${invoiceId}/cancellation/xml`,{binary:true});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`cancelamento-${invoiceId}.xml`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(error){notice(error.message);}
+    };
+  }catch(error){notice(error.message);}
+}
+function cancelInvoice(note) {
+  dialog.innerHTML=`<h2 id="dialog-title">Cancelar NFS-e ${esc(note.invoice_number)}</h2><div class="hint">${envHint(note.environment)} O pedido será enviado à SEFIN. A aceitação depende das regras de cancelamento aplicáveis à nota.</div><p>${esc(note.customer_name||'Tomador não informado')} · ${money(note.amount_cents)}</p><form><label class="field">Motivo<select name="reason_code" required><option value="">Selecione…</option><option value="1">Erro na emissão</option><option value="2">Serviço não prestado</option><option value="9">Outros</option></select></label><label class="field">Justificativa<textarea name="reason" minlength="15" maxlength="255" required></textarea></label><label class="check"><input name="confirmed" type="checkbox" required> Confirmo o pedido de cancelamento desta NFS-e.</label><p class="error" role="alert"></p><div class="actions"><button class="secondary" type="button" data-close>Voltar</button><button class="primary" type="submit">Confirmar cancelamento</button></div></form>`;
+  dialog.showModal();const form=dialog.querySelector('form');form.querySelector('[data-close]').onclick=()=>dialog.close();
+  form.onsubmit=async event=>{
+    event.preventDefault();const button=form.querySelector('[type=submit]');button.disabled=true;dialog.oncancel=e=>e.preventDefault();form.querySelector('[data-close]').disabled=true;
+    try {
+      const result=await api(`/invoices/${note.id}/cancel`,{method:'POST',body:{reason_code:form.elements.reason_code.value,reason:form.elements.reason.value.trim(),confirm_cancellation:form.elements.confirmed.checked}});
+      await load();await showCancellation(note.id,result);
+    }catch(error){if(dialog.open){form.querySelector('.error').textContent=error.message+' Se o envio ficou sem resposta, consulte o cancelamento antes de reenviar.';const check=document.createElement('button');check.type='button';check.className='secondary';check.textContent='Consultar cancelamento';check.onclick=()=>showCancellation(note.id);form.querySelector('.actions').append(check);}}
+    finally{dialog.oncancel=null;if(button.isConnected){button.disabled=false;form.querySelector('[data-close]').disabled=false;}}
+  };
+}
