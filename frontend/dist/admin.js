@@ -73,6 +73,60 @@ function renderCompanies() {
   node.innerHTML=list.length ? `<div class="table-wrap"><table><thead><tr><th>Empresa / CNPJ</th><th>Acesso</th><th>Cadastro fiscal</th><th>Ações</th></tr></thead><tbody>${list.map(c=>`<tr><td><strong>${esc(c.name)}</strong><div class="minor">${esc(cnpj(c.document))}</div></td><td><span class="badge ${c.access_enabled?'':'bad'}">${c.access_enabled?'Liberado':'Bloqueado'}</span></td><td>${c.has_fiscal_profile?'Perfil cadastrado':'Perfil pendente'}${c.has_password?'':' · Senha pendente'}</td><td><div class="actions"><button class="${c.access_enabled?'danger':'secondary'}" data-access="${esc(c.id)}">${c.access_enabled?'Bloquear':'Liberar'}</button><button class="text-button" data-password="${esc(c.id)}">Redefinir senha</button></div></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">Nenhuma empresa encontrada.</div>';
   node.querySelectorAll('[data-access]').forEach(b=>b.onclick=()=>accessForm(companies.find(c=>c.id===b.dataset.access)));
   node.querySelectorAll('[data-password]').forEach(b=>b.onclick=()=>passwordForm(companies.find(c=>c.id===b.dataset.password)));
+  node.querySelectorAll('tbody tr').forEach((row,index)=>{
+    const button=document.createElement('button');button.className='text-button';button.textContent='Numeração DPS';
+    button.onclick=()=>numberingForm(list[index]);row.querySelector('.actions').append(button);
+    const certificate=document.createElement('button');certificate.className='text-button';certificate.textContent='Certificado A1';
+    certificate.onclick=()=>certificateForm(list[index]);row.querySelector('.actions').append(certificate);
+  });
+}
+
+async function certificateForm(company) {
+  dialog.innerHTML=`<h2 id="admin-dialog-title">Certificado digital A1</h2><p>${esc(company.name)}<br>${esc(cnpj(company.document))}</p><div class="subtle" id="certificate-status" role="status">Consultando certificado…</div><form><label class="field">Arquivo do certificado (.pfx ou .p12)<input name="certificate" type="file" accept=".pfx,.p12" required></label><label class="field">Senha do certificado<input name="password" type="password" autocomplete="off" maxlength="1024"></label><p class="subtle">Limite: 512 KB. A senha, a validade e o CNPJ serão conferidos antes da substituição. O certificado será armazenado criptografado no servidor.</p><label class="check"><input type="checkbox" required> Confirmo a instalação ou substituição do certificado desta empresa.</label><p class="error" id="certificate-error" role="alert"></p><div class="actions"><button type="button" class="secondary" data-close>Cancelar</button><button class="primary" type="submit">Salvar certificado</button></div></form>`;
+  dialog.showModal();const form=dialog.querySelector('form'),status=dialog.querySelector('#certificate-status');
+  form.onsubmit=event=>event.preventDefault();
+  form.querySelector('[data-close]').onclick=()=>{form.reset();dialog.close();};
+  try {
+    const cert=await api('/companies/'+company.id+'/certificate');
+    if(status.isConnected)status.textContent=cert.configured?'Certificado instalado · válido até '+new Date(cert.valid_until).toLocaleDateString('pt-BR')+(cert.source==='legacy'?' · provisionamento anterior':' · armazenamento criptografado'):'Nenhum certificado instalado.';
+  }catch(error){if(status.isConnected)status.textContent=error.message;}
+  form.onsubmit=async event=>{
+    event.preventDefault();const button=form.querySelector('[type=submit]');button.disabled=true;
+    try {
+      const file=form.elements.certificate.files[0];
+      if(!file||!file.size||file.size>512*1024)throw new Error('Selecione um certificado de até 512 KB.');
+      const bytes=new Uint8Array(await file.arrayBuffer());let binary='';
+      for(let start=0;start<bytes.length;start+=8192)binary+=String.fromCharCode(...bytes.subarray(start,start+8192));
+      const cert=await api('/companies/'+company.id+'/certificate',{method:'POST',body:{pfx_base64:btoa(binary),password:form.elements.password.value}});
+      form.reset();dialog.close();notice('Certificado instalado. Válido até '+new Date(cert.valid_until).toLocaleDateString('pt-BR')+'.');
+    }catch(error){if(form.isConnected)form.querySelector('#certificate-error').textContent=error.message;}
+    finally{if(button.isConnected)button.disabled=false;}
+  };
+}
+
+async function numberingForm(company) {
+  try {
+    const config=await api('/companies/'+company.id+'/numbering');
+    dialog.innerHTML=`<h2 id="admin-dialog-title">Numeração da DPS</h2><p>${esc(company.name)}</p><p class="subtle">O número da NFS-e é atribuído pelo sistema nacional. Configure aqui a próxima DPS da mesma série, considerando também outros emissores.</p><form><label class="field">Ambiente<select name="environment"><option value="homologacao">Homologação</option><option value="producao">Produção · preparação</option></select></label><label class="field">Série da DPS<input name="series" required pattern="(0|[1-9][0-9]{0,4})" maxlength="5" inputmode="numeric"></label><p class="subtle" id="sequence-current"></p><label class="field">Próximo número da DPS<input name="next_number" required pattern="[1-9][0-9]{0,14}" maxlength="15" inputmode="numeric"></label><p class="subtle">Números reservados não serão reutilizados. A configuração de produção não habilita a emissão real.</p><label class="check"><input name="confirmed" type="checkbox" required> Conferi a última DPS desta série e a utilização em outros emissores.</label><p class="error" id="numbering-error" role="alert"></p><div class="actions"><button type="button" class="secondary" data-close>Cancelar</button><button class="primary" type="submit">Salvar numeração</button></div></form>`;
+    dialog.showModal();const form=dialog.querySelector('form');let expected=null;
+    const update=()=>{
+      const seq=config.sequences.find(s=>s.environment===form.elements.environment.value&&s.series===form.elements.series.value);
+      expected=seq?.next_number??null;form.elements.next_number.value=expected??'1';form.elements.confirmed.checked=false;
+      dialog.querySelector('#sequence-current').textContent=seq?'Próximo número registrado: '+seq.next_number:'Série ainda não configurada neste ambiente.';
+    };
+    form.elements.series.value=config.homologation_series||'901';update();
+    form.elements.series.oninput=update;
+    form.elements.environment.onchange=()=>{form.elements.series.value=form.elements.environment.value==='homologacao'?(config.homologation_series||'901'):'';update();};
+    form.querySelector('[data-close]').onclick=()=>dialog.close();
+    form.onsubmit=async event=>{
+      event.preventDefault();const button=form.querySelector('[type=submit]');button.disabled=true;
+      try {
+        await api('/companies/'+company.id+'/numbering',{method:'PATCH',body:{environment:form.elements.environment.value,series:form.elements.series.value,next_number:form.elements.next_number.value,expected_next_number:expected}});
+        dialog.close();notice('Numeração salva. Os próximos números serão reservados automaticamente.');
+      }catch(error){form.querySelector('#numbering-error').textContent=error.message;}
+      finally{if(button.isConnected)button.disabled=false;}
+    };
+  }catch(error){notice(error.message);}
 }
 
 function passwordField() {
@@ -139,5 +193,5 @@ function passwordForm(company) {
   };
 }
 
-dialog.addEventListener('close',()=>{dialog.querySelectorAll('input[name=password]').forEach(input=>input.value='');});
+dialog.addEventListener('close',()=>{dialog.querySelectorAll('input[name=password],input[type=file]').forEach(input=>input.value='');});
 login();

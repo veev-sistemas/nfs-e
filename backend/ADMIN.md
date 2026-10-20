@@ -30,8 +30,12 @@ Rotas:
 | GET/POST | /v1/admin/companies | Listar/cadastrar |
 | PATCH | /v1/admin/companies/:id/access | enabled booleano |
 | POST | /v1/admin/companies/:id/password | Redefinir senha |
+| GET/PATCH | /v1/admin/companies/:id/numbering | Consultar/ajustar proxima DPS |
+| GET/POST | /v1/admin/companies/:id/certificate | Metadados/instalacao do certificado A1 |
 
 Cadastro e perfil fiscal sao gravados em uma transacao. Duplicidade de CNPJ retorna 409. A empresa entra pelo CNPJ e senha na tela usual; a permissao de administrador nunca e derivada do CNPJ, da chave de API ou de campos enviados pelo usuario.
+
+As duas novas acoes exigem tambem a migracao 007. Detalhes de numeracao, protecao contra concorrencia, certificado e backup da chave em [CERTIFICATES-AND-NUMBERING.md](CERTIFICATES-AND-NUMBERING.md). A preparacao de uma sequencia de producao nao habilita emissao real.
 
 ## Tomadores e datas
 

@@ -9,7 +9,7 @@ procedure HandleAdmin(Request: TWebRequest; Response: TWebResponse);
 implementation
 
 uses System.SysUtils, System.JSON, System.RegularExpressions, Data.DB,
-  FireDAC.Comp.Client, FireDAC.Stan.Error, FireDAC.Stan.Param, Nfse.Db;
+  FireDAC.Comp.Client, FireDAC.Stan.Error, FireDAC.Stan.Param, Nfse.Db, Nfse.Certificates;
 
 type
   EAdminError = class(Exception)
@@ -48,6 +48,9 @@ var
   Body, Profile: TJSONObject;
   Value, Parsed: TJSONValue;
   Route, Method, Token, AdminId, CompanyId, Name, Document, Password, Field, Action: string;
+  Environment, Series, NextNumber, Expected: string;
+  CertificateWork: string;
+  CertificateResult: TJSONObject;
   Parts: TArray<string>;
   Enabled: Boolean;
   Guid: TGUID;
@@ -66,9 +69,9 @@ var
     try Json.AddPair('error',Message); Response.Content:=Json.ToJSON; finally Json.Free; end;
   end;
 
-  procedure ReadBody;
+  procedure ReadBody(MaxSize: Integer = 16384);
   begin
-    if (Request.Content='') or (Request.ContentLength>16384) then
+    if (Request.Content='') or (Request.ContentLength>MaxSize) or (TEncoding.UTF8.GetByteCount(Request.Content)>MaxSize) then
       raise EAdminError.Create(400,'Corpo JSON obrigatorio ou limite excedido.');
     Parsed:=TJSONObject.ParseJSONValue(Request.Content);
     if not (Parsed is TJSONObject) then begin Parsed.Free; raise EAdminError.Create(400,'Objeto JSON obrigatorio.'); end;
@@ -182,6 +185,77 @@ begin
         CompanyId:=Parts[4]; Action:=Parts[5];
         try Guid:=StringToGUID('{'+CompanyId+'}');
         except on E:EConvertError do raise EAdminError.Create(422,'Empresa invalida.'); end;
+        if (Action='certificate') and ((Method='GET') or (Method='POST')) then
+        begin
+          SQL('select document from companies where id=cast(:company as uuid)'); Q.Open;
+          if Q.IsEmpty then raise EAdminError.Create(404,'Empresa nao encontrada.');
+          Document:=Q.Fields[0].AsString; Q.Close;
+          if Method='POST' then
+          begin
+            ReadBody(720000);
+            ReadText(Body,'pfx_base64',700000);
+            Value:=Body.GetValue('password');
+            if not (Value is TJSONString) or (Value is TJSONNumber) or (Length(Value.Value)>1024) then
+              raise EAdminError.Create(422,'Senha do certificado deve ser texto.');
+            // Serialize replacements for this company; emission uses an isolated snapshot.
+            Conn.StartTransaction;
+            SQL('select id from companies where id=cast(:company as uuid) for update'); Q.Open; Q.Close;
+            Action:='install';
+          end
+          else Action:='status';
+          CertificateWork:=''; CertificateResult:=nil;
+          try
+            CertificateResult:=CertificateOperation(CompanyId,Document,Action,Body,CertificateWork);
+            if Method='POST' then begin Audit('company_certificate_uploaded'); Conn.Commit; end;
+            Response.Content:=CertificateResult.ToJSON;
+          finally CertificateResult.Free; ClearCertificateWork(CertificateWork); end;
+          Exit;
+        end;
+        if (Action='numbering') and (Method='GET') then
+        begin
+          SQL('select jsonb_build_object(''homologation_series'',f.homologation_series,''sequences'',coalesce('+
+            '(select jsonb_agg(jsonb_build_object(''environment'',s.environment,''series'',s.series,''next_number'',s.next_number::text) order by s.environment,s.series) '+
+            'from dps_sequences s where s.company_id=c.id),''[]''::jsonb))::text '+
+            'from companies c left join fiscal_profiles f on f.company_id=c.id where c.id=cast(:company as uuid)');
+          Q.Open;
+          if Q.IsEmpty then raise EAdminError.Create(404,'Empresa nao encontrada.');
+          Response.Content:=Q.Fields[0].AsString; Exit;
+        end;
+        if (Action='numbering') and (Method='PATCH') then
+        begin
+          ReadBody;
+          Environment:=ReadText(Body,'environment',20); Series:=ReadText(Body,'series',5);
+          NextNumber:=ReadText(Body,'next_number',15);
+          if ((Environment<>'homologacao') and (Environment<>'producao')) or
+            not TRegEx.IsMatch(Series,'^(0|[1-9][0-9]{0,4})$') or
+            not TRegEx.IsMatch(NextNumber,'^[1-9][0-9]{0,14}$') then
+            raise EAdminError.Create(422,'Ambiente, serie ou proximo numero invalido.');
+          Expected:=''; Value:=Body.GetValue('expected_next_number');
+          if (Value=nil) then raise EAdminError.Create(422,'Atualize a numeracao antes de salvar.');
+          if not (Value is TJSONNull) then Expected:=ReadText(Body,'expected_next_number',15);
+          Conn.StartTransaction;
+          SQL('select company_id from fiscal_profiles where company_id=cast(:company as uuid) for update'); Q.Open;
+          if Q.IsEmpty then raise EAdminError.Create(422,'Cadastre primeiro o perfil fiscal da empresa.'); Q.Close;
+          SQL('select next_number::text from dps_sequences where company_id=cast(:company as uuid) and environment=:environment and series=:series for update');
+          Q.ParamByName('environment').AsWideString:=Environment; Q.ParamByName('series').AsWideString:=Series; Q.Open;
+          if (Q.IsEmpty and (Expected<>'')) or (not Q.IsEmpty and (Q.Fields[0].AsString<>Expected)) then
+            raise EAdminError.Create(409,'A numeracao mudou. Atualize antes de salvar.');
+          if not Q.IsEmpty then
+            if StrToInt64(NextNumber)<StrToInt64(Q.Fields[0].AsString) then
+              raise EAdminError.Create(409,'Nao e permitido voltar a numeracao.');
+          Q.Close;
+          SQL('insert into dps_sequences(company_id,environment,series,next_number) values(cast(:company as uuid),:environment,:series,cast(:number as bigint)) '+
+            'on conflict(company_id,environment,series) do update set next_number=excluded.next_number');
+          Q.ParamByName('environment').AsWideString:=Environment; Q.ParamByName('series').AsWideString:=Series;
+          Q.ParamByName('number').AsWideString:=NextNumber; Q.ExecSQL;
+          if Environment='homologacao' then
+          begin
+            SQL('update fiscal_profiles set homologation_series=:series,next_homologation_number=cast(:number as bigint) where company_id=cast(:company as uuid)');
+            Q.ParamByName('series').AsWideString:=Series; Q.ParamByName('number').AsWideString:=NextNumber; Q.ExecSQL;
+          end;
+          Audit('dps_sequence_configured_'+Environment+'_'+Series+'_'+NextNumber);
+          Conn.Commit; Response.Content:='{"status":"ok"}'; Exit;
+        end;
         if not (((Action='access') and (Method='PATCH')) or ((Action='password') and (Method='POST'))) then
           raise EAdminError.Create(405,'Operacao administrativa invalida.');
         ReadBody;
@@ -211,6 +285,7 @@ begin
       else raise EAdminError.Create(404,'Rota administrativa inexistente.');
     except
       on E:EAdminError do Error(E.Status,E.Message);
+      on E:ECertificateError do Error(422,E.Message);
       on E:EFDDBEngineException do
         if E.Kind=ekUKViolated then Error(409,'Ja existe uma empresa com este CNPJ.')
         else Error(503,'Falha no cadastro administrativo. Confira a migracao e o banco.');

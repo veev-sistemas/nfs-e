@@ -6,6 +6,7 @@ uses
   System.SysUtils,
   PadraoNacional.GravarXml in 'vendor\acbr-compat\PadraoNacional.GravarXml.pas',
   Nfse.Db in 'src\Nfse.Db.pas',
+  Nfse.Certificates in 'src\Nfse.Certificates.pas',
   Nfse.Admin in 'src\Nfse.Admin.pas',
   Nfse.Emission in 'src\Nfse.Emission.pas',
   Nfse.Api in 'src\Nfse.Api.pas';

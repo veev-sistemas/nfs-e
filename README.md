@@ -105,7 +105,7 @@ O teste verifica heranca de 6%, mudanca para 8%, preservacao do historico, overr
 
 Geracao, assinatura, transmissao e consulta em homologacao foram verificadas nos ensaios locais com ACBr/Linux. A importacao do XML tambem foi validada no EasyPanel. A emissao direta de um rascunho pela API esta documentada em [backend/EMISSION-API.md](backend/EMISSION-API.md), com reserva de numeracao e bloqueio de reenvio automatico; requer migracao 004, perfil fiscal e volumes antes de habilitar. A integracao completa desse novo fluxo no servidor ainda precisa ser validada.
 
-Permanecem pendentes cancelamento, gerenciamento comercial de certificados, painel administrativo, multiplos usuarios por empresa e reconciliacao automatizada de envios inconclusivos. Rascunhos nao sao notas emitidas. O escopo atual permanece em homologacao.
+Permanecem pendentes cancelamento, multiplos usuarios por empresa e reconciliacao automatizada de envios inconclusivos. Rascunhos nao sao notas emitidas. O escopo atual permanece em homologacao.
 
 Referencia tecnica: [conexao PostgreSQL com FireDAC](https://docwiki.embarcadero.com/RADStudio/Alexandria/en/Connect_to_PostgreSQL_%28FireDAC%29).
 # Atualizacao: administracao, tomadores e filtros
@@ -118,4 +118,6 @@ Referencia tecnica: [conexao PostgreSQL com FireDAC](https://docwiki.embarcadero
 Antes de implantar esta versao em um banco existente, aplicar `backend/database/006_admin_and_filters.sql` e criar o administrador no console privado com `backend/database/bootstrap-admin.sql`. O bootstrap gera uma senha aleatoria, exibida uma vez. Detalhes em [backend/ADMIN.md](backend/ADMIN.md).
 
 O repositorio contem fontes, testes e configuracoes de exemplo. Nao contem certificados, senhas reais, notas/XMLs de clientes nem executaveis compilados. Horse e distribuido como fonte com sua licenca MIT; a adaptacao ACBr preserva seu cabecalho LGPL e depende da instalacao ACBr/Delphi descrita abaixo.
+
+Certificado A1 pela administracao, armazenamento criptografado e controle de proxima DPS por ambiente/serie: aplicar tambem a migracao 007 e seguir [as instrucoes de implantacao e backup](backend/CERTIFICATES-AND-NUMBERING.md). Configuracao de producao e somente preparacao; a emissao real permanece pendente.
 

@@ -132,6 +132,10 @@ begin
   THorse.All('/v1/admin/companies', Handle);
   THorse.Patch('/v1/admin/companies/:id/access', Handle);
   THorse.Post('/v1/admin/companies/:id/password', Handle);
+  THorse.Get('/v1/admin/companies/:id/numbering', Handle);
+  THorse.Patch('/v1/admin/companies/:id/numbering', Handle);
+  THorse.Get('/v1/admin/companies/:id/certificate', Handle);
+  THorse.Post('/v1/admin/companies/:id/certificate', Handle);
   THorse.Post('/v1/auth/login', Handle);
   THorse.Post('/v1/auth/logout', Handle);
   THorse.Get('/v1/auth/me', Handle);

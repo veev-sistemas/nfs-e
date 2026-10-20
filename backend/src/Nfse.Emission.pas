@@ -13,7 +13,7 @@ function DownloadDanfse(Conn: TFDConnection; const Company, Invoice: string): TB
 implementation
 
 uses
-  System.Classes, System.IOUtils, System.DateUtils, System.SyncObjs,
+  System.Classes, System.IOUtils, System.DateUtils, System.SyncObjs, Nfse.Certificates,
   ACBrNFSeX, ACBrDFeSSL, ACBrDFe.Conversao, ACBrNFSeXConversao,
   ACBrNFSeXNotasFiscais
   {$IFDEF LINUX}, Posix.Unistd, Posix.SysWait, Posix.Errno{$ENDIF};
@@ -62,6 +62,8 @@ var
   Contacted: Boolean;
   LocalDate: TDateTime;
   Fmt: TFormatSettings;
+  CertificateWork, CertificatePath: string;
+  CertificateResult: TJSONObject;
 
   procedure Execute(const SQL: string);
   begin
@@ -86,15 +88,26 @@ begin
   SchemaRoot := GetEnvironmentVariable('NFSE_SCHEMAS_DIR');
   if (CertRoot='') or (DataRoot='') or not FileExists(TPath.Combine(SchemaRoot,'DPS_v1.01.xsd')) then
     raise EEmissionError.Create('Diretorios fiscais ou schemas nao configurados.');
-  if not FileExists(TPath.Combine(CertRoot,Company+'.pfx')) or
-     not FileExists(TPath.Combine(CertRoot,Company+'.password')) then
-    raise EEmissionError.Create('Certificado desta empresa nao provisionado no servidor.');
   Q := TFDQuery.Create(nil);
   Q.Connection := Conn;
   Envelope := nil;
   NFSe := nil;
   Report := nil;
+  CertificateWork:=''; CertificateResult:=nil;
   try
+    Execute('select (to_jsonb(a)-''signed_dps''-''invoice_xml''-''response_text'')::text from emission_attempts a '+
+      'where company_id=cast(:company as uuid) and draft_id=cast(:draft as uuid)');
+    Q.ParamByName('draft').AsWideString:=Draft; Q.Open;
+    if not Q.IsEmpty then begin Result:=Q.Fields[0].AsString; Exit; end;
+    Q.Close;
+    Execute('select document from companies where id=cast(:company as uuid)'); Q.Open;
+    if Q.IsEmpty then raise EEmissionError.Create('Empresa nao encontrada.');
+    try
+      CertificateResult:=CertificateOperation(Company,Q.Fields[0].AsString,'materialize',nil,CertificateWork);
+      CertificatePath:=S(CertificateResult,'path');
+      Password:=CertificateResult.GetValue('password').Value;
+    except on E:ECertificateError do raise EEmissionError.Create(E.Message); end;
+    Q.Close;
     // Validar o perfil suportado antes de reservar numero ou contatar a SEFIN.
     Execute('select settings_snapshot::text from drafts where company_id=cast(:company as uuid) ' +
       'and id=cast(:draft as uuid)');
@@ -173,10 +186,8 @@ begin
         NFSe.Configuracoes.Geral.CodigoMunicipio := StrToInt(S(Profile,'municipality_code'));
         NFSe.SetProvedor(proPadraoNacional,ve101);
         if NFSe.Provider.ConfigWebServices.Homologacao.GerarNFSe <> BaseURL then raise EEmissionError.Create('URL de homologacao incorreta.');
-        Password := TFile.ReadAllText(TPath.Combine(CertRoot,Company+'.password'),TEncoding.UTF8);
-        while (Length(Password)>0) and CharInSet(Password[Length(Password)],[#10,#13]) do Delete(Password,Length(Password),1);
-        NFSe.SSL.ArquivoPFX := TPath.Combine(CertRoot,Company+'.pfx');
-        NFSe.SSL.Senha := AnsiString(Password);
+        NFSe.SSL.ArquivoPFX := CertificatePath;
+        NFSe.SSL.Senha := AnsiString(UTF8String(Password));
         Password := '';
         NFSe.SSL.CarregarCertificado;
         if NFSe.SSL.CertCNPJ <> S(CompanyData,'document') then
@@ -332,6 +343,7 @@ begin
     Q.Open;
     Result:=Q.Fields[0].AsString;
   finally
+    Password:=''; CertificateResult.Free; ClearCertificateWork(CertificateWork);
     Report.Free;
     Envelope.Free;
     Q.Free;

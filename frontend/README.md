@@ -1,6 +1,8 @@
 # Frontend VEEV NFS-e
 
-Em Configuracoes ha a opcao Enviar grupo IBS/CBS (desmarcada por padrao) e o campo cClassTrib. Podem ser mantidos false e 000001 conforme a escolha do usuario para CARLTON. Salvar um codigo nao ativa o grupo. Os mesmos valores aparecem na criacao de novos rascunhos e permanecem no snapshot. O envio completo IBS/CBS ainda esta indisponivel; marcar true bloqueia a emissao no backend em vez de ignorar a escolha. Desmarcar nao resolve E0855 de um ambiente que exija o grupo; o enquadramento da empresa e a regra do ambiente precisam ser verificados.
+Em Configuracoes ha a opcao Enviar grupo IBS/CBS e os codigos fiscais. O perfil implementado e validado em homologacao utiliza CST 200, cClassTrib 200048 e cIndOp 030101. Salvar um codigo nao ativa o grupo. Os valores de cada rascunho permanecem no snapshot. Desmarcar o grupo nao resolve E0855 de um ambiente que exija essas informacoes.
+
+Em `/admin.html`, as acoes **Numeracao DPS** e **Certificado A1** permitem configurar a proxima DPS por empresa/serie/ambiente e instalar um PFX/P12 com senha. Requer backend atualizado e migracao 007. Consulte `../backend/CERTIFICATES-AND-NUMBERING.md` para implantacao e backup privado. Producao permanece somente em preparacao.
 
 Atualizacao 20/10/2026: o resultado da tentativa exibe tambem o complemento de validacao retornado pelo backend atualizado. Tentativas antigas mantem seu resultado salvo; esta alteracao nao reenvia notas.
 
