@@ -527,6 +527,7 @@ begin
         end;
         if (Route='/v1/invoices/'+InvoiceId+'/cancellation') or (Route='/v1/invoices/'+InvoiceId+'/cancellation/xml') then
         begin
+          ReconcileSavedCancellation(Conn,Company,InvoiceId);
           Run('select (to_jsonb(a)-''event_xml'')::text,event_xml from cancellation_attempts a where company_id=cast(:company as uuid) and invoice_id=cast(:id as uuid) order by created_at desc,id desc limit 1');
           Q.ParamByName('id').AsWideString:=InvoiceId; Q.Open;
           if Q.IsEmpty then raise EApiError.Create(404,'Nenhuma tentativa de cancelamento.');

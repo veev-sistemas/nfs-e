@@ -10,6 +10,7 @@ type
 function EmitInvoice(Conn: TFDConnection; const Company, Draft, IssuedAt, Competence, Environment: string): string;
 function EmissionConfig(Conn: TFDConnection; const Company: string): string;
 function CancelInvoice(Conn: TFDConnection; const Company, Invoice, Reason: string; Code: Integer): string;
+procedure ReconcileSavedCancellation(Conn: TFDConnection; const Company, Invoice: string);
 function DownloadDanfse(Conn: TFDConnection; const Company, Invoice: string): TBytes;
 
 implementation

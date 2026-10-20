@@ -1,5 +1,11 @@
 # Compatibilidade NT009 / NFS-e regular em homologacao
 
+## Assinaturas aninhadas de eventos
+
+`ACBrDFeXsLibXml2.pas` copia a unidade instalada em C:/ACBr, preservando cabecalho e licenca LGPL. A unica alteracao funcional seleciona `SignedInfo` dentro do `SignNode` ja identificado por `infElement`, em vez da primeira ocorrencia global no documento. O evento de cancelamento contem assinatura do pedido dentro de `infEvento` e assinatura externa do evento. A verificacao global anterior utilizava o `SignedInfo` do pedido ao conferir o evento externo. O DPR referencia explicitamente a copia local. Nao altera XML assinado nem dispensa verificacao de assinatura.
+
+Regressao offline: gerar fixtures com `tests/nested-event-signatures.py`, assinar com `SignNestedEventProbe`, validar com `VerifyEventProbe` e executar `saved-cancellation-regression.py` dentro do harness HTTP. Duas chaves ficticias diferentes; documento adulterado deve falhar; consulta GET deve recuperar uma resposta salva valida sem transmissao fiscal. Nunca incluir PFXs de teste nos pacotes de deploy.
+
 PadraoNacional.GravarXml.pas e uma copia do gerador ACBr instalado em C:/ACBr em 20/10/2026, preservando cabecalho e licenca LGPL. GerarXMLInfDps inclui finNFSe=0 antes de cLocEmi em homologacao e rejeita finalidade de credito/debito. GerarXMLCodigoServico coloca cNBS e cIntContrib antes de xDescServ, conforme o leiaute da NT009 v1.01 (planilha LEIAUTE DPS_NFS-e - RT, linhas 229 a 234). O DPR referencia explicitamente esta copia; nao modifica a instalacao compartilhada do Delphi/ACBr.
 
 Referencia oficial: NT009 v1.01, secao 2.2, pagina 4, https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/rtc/nota-tecnica-009-se-cgnfs-e-v-1-01.pdf . Retorno do servidor em 20/10/2026: E1235 esperando cMotivoEmisTI ou finNFSe quando recebeu cLocEmi.

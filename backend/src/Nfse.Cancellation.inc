@@ -1,4 +1,80 @@
 // Included in Nfse.Emission to share the ACBr process lock.
+procedure ValidateCancellationEvent(NFSe: TACBrNFSeX; const Xml, Schemas: string);
+var ErrorText: string;
+begin
+  if (TEncoding.UTF8.GetByteCount(Xml)>524288) or (Pos('<!DOCTYPE',UpperCase(Xml))>0) or
+    (Pos('<!ENTITY',UpperCase(Xml))>0) then raise EEmissionError.Create('Evento recebido invalido.');
+  if not NFSe.SSL.Validar(Xml,TPath.Combine(Schemas,'evento_v1.01.xsd'),ErrorText) then
+    raise EEmissionError.Create('Schema do evento recebido invalido: '+ErrorText);
+  if not NFSe.SSL.VerificarAssinatura(Xml,ErrorText,'infEvento','','','','Id') then
+    raise EEmissionError.Create('Assinatura do evento invalida: '+ErrorText);
+  if not NFSe.SSL.VerificarAssinatura(Xml,ErrorText,'infPedReg','','','','Id') then
+    raise EEmissionError.Create('Assinatura do pedido de cancelamento invalida: '+ErrorText);
+end;
+
+// Read-only with respect to the fiscal service: only the previously saved reply is used.
+// A local confirmation is persisted only after schema/signature + DB identity checks.
+procedure ReconcileSavedCancellation(Conn: TFDConnection; const Company, Invoice: string);
+var Q: TFDQuery; NFSe: TACBrNFSeX; AttemptId, Environment, Folder, Path, Xml, Schemas: string;
+  Report: TJSONObject; Input: TFileStream;
+begin
+  Q:=TFDQuery.Create(nil); Q.Connection:=Conn; NFSe:=nil; Report:=nil;
+  FiscalLock.Acquire;
+  try
+    Q.SQL.Text:='select a.id::text,i.environment from cancellation_attempts a join invoices i on i.id=a.invoice_id and i.company_id=a.company_id '+
+      'where a.company_id=cast(:company as uuid) and a.invoice_id=cast(:invoice as uuid) and a.status in (''sending'',''unknown'') order by a.created_at desc,a.id desc limit 1';
+    Q.ParamByName('company').AsWideString:=Company; Q.ParamByName('invoice').AsWideString:=Invoice; Q.Open;
+    if Q.IsEmpty then Exit;
+    AttemptId:=Q.Fields[0].AsString; Environment:=Q.Fields[1].AsString; Q.Close;
+    Folder:=TPath.Combine(TPath.Combine(GetEnvironmentVariable('NFSE_DATA_DIR'),Company),'cancel-'+AttemptId);
+    Path:=TPath.Combine(Folder,'resposta.txt');
+    if not FileExists(Path) then Exit;
+    Input:=TFileStream.Create(Path,fmOpenRead or fmShareDenyNone);
+    try if (Input.Size=0) or (Input.Size>524288) then Exit; finally Input.Free; end;
+    Xml:=TFile.ReadAllText(Path,TEncoding.UTF8);
+    // ACBr replaces ArquivoRetorno with the decompressed event after successful parsing.
+    if (Pos('<evento',Xml)=0) then Exit;
+    Schemas:=GetEnvironmentVariable('NFSE_SCHEMAS_DIR');
+    if Environment='producao' then
+    begin Schemas:=GetEnvironmentVariable('NFSE_PRODUCTION_SCHEMAS_DIR'); if Schemas='' then Schemas:='/app/schemas-production'; end;
+    NFSe:=TACBrNFSeX.Create(nil);
+    NFSe.Configuracoes.Geral.SSLCryptLib:=cryOpenSSL;
+    NFSe.Configuracoes.Geral.SSLXmlSignLib:=xsLibXml2;
+    NFSe.Configuracoes.Geral.SSLHttpLib:=httpOpenSSL;
+    try ValidateCancellationEvent(NFSe,Xml,Schemas);
+    except on E:Exception do
+      begin
+        TFile.WriteAllText(TPath.Combine(Folder,'reconcile-error.txt'),Copy(E.Message,1,2048),TEncoding.UTF8);
+        Exit;
+      end;
+    end; // Invalid or incomplete saved reply remains unresolved.
+    Report:=TJSONObject.Create;
+    Report.AddPair('status','cancelled'); Report.AddPair('recovered_from_saved_event',TJSONTrue.Create);
+    Conn.StartTransaction;
+    try
+      Q.SQL.Text:='select status from cancellation_attempts where id=cast(:attempt as uuid) and company_id=cast(:company as uuid) for update';
+      Q.ParamByName('attempt').AsWideString:=AttemptId; Q.ParamByName('company').AsWideString:=Company; Q.Open;
+      if Q.IsEmpty then begin Conn.Rollback; Exit; end;
+      if (Q.Fields[0].AsString<>'sending') and (Q.Fields[0].AsString<>'unknown') then begin Q.Close; Conn.Rollback; Exit; end;
+      Q.Close;
+      // The transition is invisible outside this transaction; the no-resend reservation stays held.
+      Q.SQL.Text:='update cancellation_attempts set status=''sending'' where id=cast(:attempt as uuid) and company_id=cast(:company as uuid)';
+      Q.ParamByName('attempt').AsWideString:=AttemptId; Q.ParamByName('company').AsWideString:=Company; Q.ExecSQL;
+      Q.SQL.Text:='select finish_cancellation(cast(:company as uuid),cast(:attempt as uuid),''cancelled'',cast(:result as jsonb),:xml)';
+      Q.ParamByName('company').AsWideString:=Company; Q.ParamByName('attempt').AsWideString:=AttemptId;
+      Q.ParamByName('result').AsWideString:=Report.ToJSON; Q.ParamByName('xml').AsWideString:=Xml; Q.Open; Q.Close;
+      Conn.Commit;
+    except on E:Exception do
+      begin
+        if Conn.InTransaction then Conn.Rollback;
+        TFile.WriteAllText(TPath.Combine(Folder,'reconcile-error.txt'),Copy(E.Message,1,2048),TEncoding.UTF8);
+      end;
+    end;
+  finally
+    Report.Free; NFSe.Free; Q.Free; FiscalLock.Release;
+  end;
+end;
+
 function CancelInvoice(Conn: TFDConnection; const Company, Invoice, Reason: string; Code: Integer): string;
 var
   Q: TFDQuery; NFSe: TACBrNFSeX; Event: TInfEvento;
@@ -106,8 +182,7 @@ begin
       if NFSe.WebService.EnviarEvento.SucessoCanc and NFSe.WebService.EnviarEvento.Sucesso and (Errors.Count=0) then
       begin
         Xml:=NFSe.WebService.EnviarEvento.XmlRetorno;
-        if not NFSe.SSL.Validar(Xml,TPath.Combine(Schemas,'evento_v1.01.xsd'),ErrorText) then raise EEmissionError.Create('Evento recebido invalido.');
-        if not NFSe.SSL.VerificarAssinatura(Xml,ErrorText,'infEvento','','','','Id') then raise EEmissionError.Create('Assinatura do evento invalida.');
+        ValidateCancellationEvent(NFSe,Xml,Schemas);
         State:='cancelled';
       end
       else if Errors.Count>0 then
@@ -121,7 +196,13 @@ begin
           (TJSONObject(ResponseValue).GetValue('eventoXmlGZipB64')=nil) then State:='rejected';
       end;
     except
-      on E:Exception do begin State:='unknown'; Xml:=''; Report.AddPair('error','Cancelamento sem confirmacao. Consulte esta tentativa antes de outra operacao.'); end;
+      on E:Exception do
+      begin
+        State:='unknown'; Xml:='';
+        if DirectoryExists(Folder) then
+          TFile.WriteAllText(TPath.Combine(Folder,'diagnostico.txt'),Copy(E.Message,1,2048),TEncoding.UTF8);
+        Report.AddPair('error','Cancelamento sem confirmacao. Consulte esta tentativa antes de outra operacao.');
+      end;
     end;
     Report.AddPair('status',State);
     try
