@@ -1,0 +1,4 @@
+build-tools/
+frames/
+__pycache__/
+*.zip
