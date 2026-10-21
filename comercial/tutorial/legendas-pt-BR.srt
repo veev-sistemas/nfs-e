@@ -1,0 +1,63 @@
+1
+00:00:00,000 --> 00:00:10,000
+Aprenda a cadastrar o tomador e preparar sua NFS-e. Este vídeo usa dados fictícios e uma simulação em homologação.
+
+2
+00:00:10,000 --> 00:00:20,000
+Acesse nfse.veevsistemas.com. Informe o CNPJ e a senha da sua empresa e clique em Entrar na minha conta.
+
+3
+00:00:20,000 --> 00:00:28,000
+No menu lateral, clique em Tomadores. Depois, clique em Cadastrar tomador.
+
+4
+00:00:28,000 --> 00:00:39,000
+Informe o nome ou a razão social e o CPF ou CNPJ do cliente. No uso real, preencha o documento correto; os zeros são apenas ilustrativos.
+
+5
+00:00:39,000 --> 00:00:47,000
+Confira os dados e clique em Cadastrar tomador para salvar o cliente.
+
+6
+00:00:47,000 --> 00:00:56,000
+O tomador aparece na lista e poderá ser selecionado nas próximas notas. Você não precisa cadastrá-lo novamente.
+
+7
+00:00:56,000 --> 00:01:06,000
+Clique em Nova NFS-e. Confira o ambiente indicado no menu: Homologação é teste; Produção gera nota com validade fiscal.
+
+8
+00:01:06,000 --> 00:01:15,000
+Preencha o valor do serviço e a descrição da operação. Aqui usamos R$ 250,00 e um serviço fictício.
+
+9
+00:01:15,000 --> 00:01:26,000
+Os códigos e tributos vêm dos padrões da empresa. Use os parâmetros fiscais aprovados para o seu serviço; não copie os valores do exemplo.
+
+10
+00:01:26,000 --> 00:01:36,000
+Na seção Quem é o tomador?, desmarque Tomador não informado e selecione o cliente na lista.
+
+11
+00:01:36,000 --> 00:01:44,000
+Clique em Salvar e revisar. Essa ação cria o rascunho; a nota ainda não foi emitida.
+
+12
+00:01:44,000 --> 00:01:54,000
+Revise prestador, tomador, valor e descrição. Confira a data de competência antes de confirmar.
+
+13
+00:01:54,000 --> 00:02:06,000
+Neste exemplo, o botão é Emitir em homologação. Em Produção, marque a confirmação da nota real e clique em Emitir nota real em produção.
+
+14
+00:02:06,000 --> 00:02:17,000
+Somente após o resultado Autorizada a emissão está confirmada. Se houver erro ou resultado inconclusivo, consulte a tentativa antes de repetir.
+
+15
+00:02:17,000 --> 00:02:28,000
+Clique em Ver notas fiscais. Na lista, use DANFSe para o PDF e XML para o arquivo eletrônico. Os filtros ajudam a localizar a nota.
+
+16
+00:02:28,000 --> 00:02:38,000
+Acesse nfse.veevsistemas.com. Em caso de dúvida, fale com o suporte VEEV. Este tutorial não realizou nenhuma emissão fiscal real.

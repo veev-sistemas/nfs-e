@@ -1,0 +1,98 @@
+[
+  {
+    "start": 0,
+    "end": 10,
+    "text": "Aprenda a cadastrar o tomador e preparar sua NFS-e. Este vídeo usa dados fictícios e uma simulação em homologação.",
+    "title": "Do cadastro à nota autorizada"
+  },
+  {
+    "start": 10,
+    "end": 20,
+    "text": "Acesse nfse.veevsistemas.com. Informe o CNPJ e a senha da sua empresa e clique em Entrar na minha conta.",
+    "title": "Entre na sua empresa"
+  },
+  {
+    "start": 20,
+    "end": 28,
+    "text": "No menu lateral, clique em Tomadores. Depois, clique em Cadastrar tomador.",
+    "title": "Abra o cadastro de clientes"
+  },
+  {
+    "start": 28,
+    "end": 39,
+    "text": "Informe o nome ou a razão social e o CPF ou CNPJ do cliente. No uso real, preencha o documento correto; os zeros são apenas ilustrativos.",
+    "title": "Preencha o nome e o documento"
+  },
+  {
+    "start": 39,
+    "end": 47,
+    "text": "Confira os dados e clique em Cadastrar tomador para salvar o cliente.",
+    "title": "Confirme o cadastro"
+  },
+  {
+    "start": 47,
+    "end": 56,
+    "text": "O tomador aparece na lista e poderá ser selecionado nas próximas notas. Você não precisa cadastrá-lo novamente.",
+    "title": "Cliente pronto para selecionar"
+  },
+  {
+    "start": 56,
+    "end": 66,
+    "text": "Clique em Nova NFS-e. Confira o ambiente indicado no menu: Homologação é teste; Produção gera nota com validade fiscal.",
+    "title": "Abra uma Nova NFS-e"
+  },
+  {
+    "start": 66,
+    "end": 75,
+    "text": "Preencha o valor do serviço e a descrição da operação. Aqui usamos R$ 250,00 e um serviço fictício.",
+    "title": "Informe o valor e o serviço"
+  },
+  {
+    "start": 75,
+    "end": 86,
+    "text": "Os códigos e tributos vêm dos padrões da empresa. Use os parâmetros fiscais aprovados para o seu serviço; não copie os valores do exemplo.",
+    "title": "Confira os parâmetros cadastrados"
+  },
+  {
+    "start": 86,
+    "end": 96,
+    "text": "Na seção Quem é o tomador?, desmarque Tomador não informado e selecione o cliente na lista.",
+    "title": "Selecione o cliente cadastrado"
+  },
+  {
+    "start": 96,
+    "end": 104,
+    "text": "Clique em Salvar e revisar. Essa ação cria o rascunho; a nota ainda não foi emitida.",
+    "title": "Salve para revisar"
+  },
+  {
+    "start": 104,
+    "end": 114,
+    "text": "Revise prestador, tomador, valor e descrição. Confira a data de competência antes de confirmar.",
+    "title": "Confira todos os dados"
+  },
+  {
+    "start": 114,
+    "end": 126,
+    "text": "Neste exemplo, o botão é Emitir em homologação. Em Produção, marque a confirmação da nota real e clique em Emitir nota real em produção.",
+    "title": "Confirme no ambiente correto"
+  },
+  {
+    "start": 126,
+    "end": 137,
+    "text": "Somente após o resultado Autorizada a emissão está confirmada. Se houver erro ou resultado inconclusivo, consulte a tentativa antes de repetir.",
+    "title": "Aguarde a autorização"
+  },
+  {
+    "start": 137,
+    "end": 148,
+    "text": "Clique em Ver notas fiscais. Na lista, use DANFSe para o PDF e XML para o arquivo eletrônico. Os filtros ajudam a localizar a nota.",
+    "title": "Localize a nota e baixe os arquivos"
+  },
+  {
+    "start": 148,
+    "end": 158,
+    "text": "Acesse nfse.veevsistemas.com. Em caso de dúvida, fale com o suporte VEEV. Este tutorial não realizou nenhuma emissão fiscal real.",
+    "title": "Seu cliente cadastrado. Sua nota organizada."
+  }
+]

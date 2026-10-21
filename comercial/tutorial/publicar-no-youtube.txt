@@ -1,0 +1,27 @@
+TÍTULO SUGERIDO
+Como cadastrar o tomador e emitir NFS-e | Tutorial VEEV Sistemas
+
+DESCRIÇÃO
+Aprenda o passo a passo do VEEV NFS-e: cadastre o tomador, preencha os dados do serviço, selecione o cliente, revise a nota e consulte os documentos.
+
+Acesse o sistema: https://nfse.veevsistemas.com/
+
+Este tutorial usa dados fictícios e uma simulação em homologação. Os documentos e os valores mostrados não representam uma emissão fiscal real. Para emitir em produção, utilize os dados reais do serviço e os parâmetros fiscais aprovados para sua empresa.
+
+CAPÍTULOS
+00:00 Introdução
+00:10 Acesso ao sistema
+00:20 Cadastro do tomador
+00:56 Preparação da nota
+01:26 Seleção do tomador
+01:44 Revisão e confirmação
+02:06 Resultado da emissão
+02:17 XML e DANFSe
+02:28 Encerramento
+
+ARQUIVOS
+Vídeo: tutorial-veev-tomador-e-nota-youtube.mp4
+Capa: capa-youtube.jpg
+Legendas opcionais: legendas-pt-BR.srt
+
+Vídeo horizontal Full HD (1920 x 1080), duração 2min38s, sem áudio. As legendas explicativas já estão gravadas na imagem; o SRT é uma opção adicional para a faixa de legendas do YouTube. Nenhum arquivo foi publicado automaticamente no YouTube.

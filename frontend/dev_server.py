@@ -119,7 +119,7 @@ class Handler(SimpleHTTPRequestHandler):
                 self.respond(200,ATTEMPTS[draft['attempt_id']])
                 return
             attempt = dict(id=str(uuid.uuid4()),draft_id=draft['id'],environment='homologacao',status='authorized',dps_number=len(ATTEMPTS)+1,dps_series='901',result={'errors':[]})
-            invoice = dict(id=str(uuid.uuid4()),draft_id=draft['id'],environment='homologacao',access_key='3'*50,invoice_number=str(len(INVOICES)+1),issuer_document=COMPANY['document'],amount_cents=draft['amount_cents'],status='authorized_homologation',source='sefin_api',imported_at=now())
+            invoice = dict(id=str(uuid.uuid4()),draft_id=draft['id'],environment='homologacao',access_key='3'*50,customer_name=next((c['name'] for c in CUSTOMERS if c['id']==draft.get('customer_id')),None),invoice_number=str(max(int(n['invoice_number']) for n in INVOICES)+1),issuer_document=COMPANY['document'],amount_cents=draft['amount_cents'],status='authorized_homologation',source='sefin_api',imported_at=now())
             attempt['invoice_id'] = invoice['id']
             ATTEMPTS[attempt['id']] = attempt
             draft.update(attempt_id=attempt['id'],attempt_status=attempt['status'])
