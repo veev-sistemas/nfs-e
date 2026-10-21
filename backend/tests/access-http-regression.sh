@@ -2,6 +2,7 @@
 set -euo pipefail
 # ROOT, local WSL test only. Never point this harness at a live database.
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+runuser -u postgres -- psql -v ON_ERROR_STOP=1 -d nfse_access_test -f "$root/database/010-payment-method.sql"
 runuser -u postgres -- psql -v ON_ERROR_STOP=1 -d nfse_access_test <<'SQL'
 DO $$ BEGIN
   IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='nfse_access_runner') THEN
@@ -42,6 +43,7 @@ python3 "$root/tests/numbering-and-certificates-http.py"
 python3 "$root/tests/production-regression.py"
 python3 "$root/tests/environment-cancellation-regression.py"
 python3 "$root/tests/saved-cancellation-regression.py"
+python3 "$root/tests/payment-totals-regression.py"
 if [[ "${NFSE_QA_KEEP_ALIVE:-0}" == "1" ]]; then
   runuser -u postgres -- psql -v ON_ERROR_STOP=1 -d nfse_access_test -c "UPDATE admin_users SET enabled=true,failed_attempts=0,locked_until=NULL WHERE username='regression-admin'" >/dev/null
   echo 'QA local pronta em 127.0.0.1:19002; finalizar este processo encerra a API.'

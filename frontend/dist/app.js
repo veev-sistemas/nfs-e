@@ -8,10 +8,10 @@ const envLabel = value => value==='producao'?'Produção':'Homologação';
 const envHint = value => value==='producao'?'Produção: as notas emitidas possuem validade fiscal.':'Homologação: notas de teste, sem validade fiscal.';
 let data = { invoices: [], drafts: [], customers: [], settings: {} };
 let generation = 0;
-let toastTimer;
+let toastTimer, invoiceSearchTimer;
 let sending = false;
 let invoiceFilters = {from:'',to:'',search:'',status:''};
-const invoicePath = () => '/invoices?' + new URLSearchParams({date_from:invoiceFilters.from,date_to:invoiceFilters.to,status:invoiceFilters.status,environment});
+const invoicePath = () => '/invoices?' + new URLSearchParams({date_from:invoiceFilters.from,date_to:invoiceFilters.to,status:invoiceFilters.status,environment,search:invoiceFilters.search,include_totals:1});
 const labels = { overview: 'Visão geral', new: 'Nova NFS-e', invoices: 'Notas fiscais', drafts: 'Rascunhos', customers: 'Tomadores', settings: 'Configurações' };
 const paths = {
   overview:'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',
@@ -135,7 +135,7 @@ async function load() {
     const [settings, customers, drafts, invoices] = await Promise.all(['/settings','/customers','/drafts?environment='+environment,invoicePath()].map(path => api(path)));
     if (!company || current !== generation) return;
     emissionConfig=config;
-    data = {settings,customers,drafts:drafts.filter(d=>(d.environment||'homologacao')===environment),invoices};
+    data = {settings,customers,drafts:drafts.filter(d=>(d.environment||'homologacao')===environment),invoices:Array.isArray(invoices)?invoices:invoices.invoices,invoiceSummary:invoices.summary||null};
     renderPage();
   } catch (error) {
     if (!company || current !== generation) return;
@@ -145,6 +145,7 @@ async function load() {
 }
 
 function navigate(next) {
+  clearTimeout(invoiceSearchTimer);
   page = next;
   document.querySelectorAll('[data-page]').forEach(button => button.classList.toggle('active',button.dataset.page === page));
   document.querySelector('#breadcrumb').textContent = labels[page];
@@ -160,9 +161,20 @@ function draftStatus(draft) {
   return data.invoices.some(i => i.draft_id === draft.id) ? 'authorized' : draft.attempt_status || 'draft';
 }
 
+const paymentMethods = [['dinheiro','Dinheiro'],['pix','PIX'],['boleto','Boleto'],['cartao_credito','Cartão de crédito'],['cartao_debito','Cartão de débito']];
+const paymentLabel = value => paymentMethods.find(([key])=>key===value)?.[1] || 'Não informado';
+function invoiceTotals(summary) {
+  if (!summary) return '';
+  const byPayment = [...paymentMethods,['nao_informado','Não informado']].map(([method,label])=>{
+    const item=summary.by_payment.find(p=>p.payment_method===method)||{count:0,total_cents:0};
+    return `<article class="payment-total"><span>${label}</span><strong>${money(item.total_cents)}</strong><small>${item.count} nota(s)</small></article>`;
+  }).join('');
+  return `<section class="panel invoice-totals" aria-label="Totais das notas filtradas"><div class="panel-header"><div><h2>Totais da consulta</h2><p>Todo o resultado dos filtros, incluindo a busca. Canceladas não entram no total geral nem nos totais por pagamento.</p></div></div><div class="totals-main"><div><span>Quantidade de notas</span><strong>${summary.count}</strong></div><div><span>Total geral (sem canceladas)</span><strong>${money(summary.total_cents)}</strong></div><div><span>Canceladas: ${summary.cancelled_count}</span><strong>${money(summary.cancelled_cents)}</strong></div></div><div class="payment-totals">${byPayment}</div><p class="footer-note">Forma de pagamento informada no lançamento; não representa confirmação de recebimento. Notas antigas ou importadas podem constar como não informado.</p></section>`;
+}
+
 function invoiceTable(invoices) {
   if (!invoices.length) return empty('Nenhuma nota por aqui', 'As notas autorizadas aparecerão nesta lista.');
-  return `<div class="table-wrap"><table><thead><tr><th>Nota / emissão</th><th>Tomador</th><th>Ambiente</th><th>Valor</th><th>Situação</th><th>Documentos</th></tr></thead><tbody>${invoices.map(note => `<tr><td><strong>NFS-e ${esc(note.invoice_number)}</strong><div class="minor">${esc(date(note.issued_at || note.imported_at))}</div></td><td>${esc((note.customer_name||'Tomador não informado').toLocaleUpperCase('pt-BR'))}</td><td>${envLabel(note.environment)}</td><td><strong>${money(note.amount_cents)}</strong></td><td>${badge(note.status)}</td><td><div class="actions">${note.status!=='cancelled'?`<button class="text-button" data-download="${esc(note.id)}" data-format="pdf">${icon('download')} DANFSe</button>`:''}<button class="text-button" data-download="${esc(note.id)}" data-format="xml">XML</button><button class="text-button" data-note="${esc(note.id)}">Detalhes</button>${['authorized_production','authorized_homologation'].includes(note.status)&&note.source==='sefin_api'&&!['sending','unknown'].includes(note.cancellation_status)?`<button class="text-button" data-cancel="${esc(note.id)}">Cancelar NFS-e</button>`:''}${note.status==='cancelled'||['sending','unknown'].includes(note.cancellation_status)?`<button class="text-button" data-cancel-result="${esc(note.id)}">Consultar cancelamento</button>`:''}</div></td></tr>`).join('')}</tbody></table></div>`;
+  return `<div class="table-wrap"><table><thead><tr><th>Nota / emissão</th><th>Tomador</th><th>Ambiente</th><th>Valor</th><th>Pagamento</th><th>Situação</th><th>Documentos</th></tr></thead><tbody>${invoices.map(note => `<tr><td><strong>NFS-e ${esc(note.invoice_number)}</strong><div class="minor">${esc(date(note.issued_at || note.imported_at))}</div></td><td>${esc((note.customer_name||'Tomador não informado').toLocaleUpperCase('pt-BR'))}</td><td>${envLabel(note.environment)}</td><td><strong>${money(note.amount_cents)}</strong></td><td>${esc(paymentLabel(note.payment_method))}</td><td>${badge(note.status)}</td><td><div class="actions">${note.status!=='cancelled'?`<button class="text-button" data-download="${esc(note.id)}" data-format="pdf">${icon('download')} DANFSe</button>`:''}<button class="text-button" data-download="${esc(note.id)}" data-format="xml">XML</button><button class="text-button" data-note="${esc(note.id)}">Detalhes</button>${['authorized_production','authorized_homologation'].includes(note.status)&&note.source==='sefin_api'&&!['sending','unknown'].includes(note.cancellation_status)?`<button class="text-button" data-cancel="${esc(note.id)}">Cancelar NFS-e</button>`:''}${note.status==='cancelled'||['sending','unknown'].includes(note.cancellation_status)?`<button class="text-button" data-cancel-result="${esc(note.id)}">Consultar cancelamento</button>`:''}</div></td></tr>`).join('')}</tbody></table></div>`;
 }
 
 function renderPage() {
@@ -173,7 +185,7 @@ function renderPage() {
     content.innerHTML = title('Sua empresa, em dia.', 'Acompanhe suas notas e continue de onde parou.', newButton()) +
       `<div class="banner">${icon('shield')} ${envHint(environment)} ${environment==='producao'&&!emissionConfig.production_available?'A emissão está bloqueada. Consulte o administrador.':''}</div><div class="stats"><article class="stat"><span class="eyebrow">Notas disponíveis</span><span class="stat-icon">${icon('invoices')}</span><strong>${data.invoices.length}</strong><span class="subtle">Notas na consulta atual</span></article><article class="stat"><span class="eyebrow">Valor das notas</span><span class="stat-icon">${icon('check')}</span><strong>${money(data.invoices.reduce((sum,n) => sum + Number(n.amount_cents),0))}</strong><span class="subtle">${envLabel(environment)}</span></article><article class="stat"><span class="eyebrow">Rascunhos pendentes</span><span class="stat-icon">${icon('drafts')}</span><strong>${pending}</strong><span class="subtle">Prontos para revisar</span></article></div><section class="panel"><div class="panel-header"><div><h2>Últimas notas</h2><p>Documentos e informações em um só lugar.</p></div><button class="text-button" data-go="invoices">Ver todas ${icon('arrow')}</button></div>${invoiceTable(data.invoices.slice(0,5))}</section><p class="footer-note">Os indicadores consideram os últimos 100 registros retornados pelo sistema.</p>`;
   } else if (page === 'invoices') {
-    content.innerHTML = title('Notas fiscais','Consulte por data de emissão e baixe os documentos.', '<button class="secondary" id="refresh">Atualizar lista</button>') + `<section class="panel"><div class="panel-header"><div><h2>Suas NFS-e</h2><p>${data.invoices.length} notas no período consultado · ${envLabel(environment)}</p></div></div><form class="table-tools invoice-filters" id="invoice-filters"><label class="field">Emissão de<input type="date" name="from" value="${esc(invoiceFilters.from)}"></label><label class="field">Até<input type="date" name="to" value="${esc(invoiceFilters.to)}"></label><label class="field">Situação<select name="status">${[['','Todas'],['authorized','Autorizadas'],['cancelled','Canceladas'],['imported','Importadas']].map(([value,label])=>`<option value="${value}" ${invoiceFilters.status===value?'selected':''}>${label}</option>`).join('')}</select></label><button class="primary" type="submit">Filtrar</button><button class="secondary" type="button" id="clear-filters">Limpar</button></form><div class="table-tools"><input class="search" id="invoice-search" type="search" value="${esc(invoiceFilters.search)}" placeholder="Buscar por número, chave ou tomador" aria-label="Buscar nota"></div><div id="invoice-list"></div></section><p class="footer-note">Até 100 notas por consulta. Datas de emissão no horário de Brasília; data final incluída.</p>`;
+    content.innerHTML = title('Notas fiscais','Consulte por data de emissão e baixe os documentos.', '<button class="secondary" id="refresh">Atualizar lista</button>') + invoiceTotals(data.invoiceSummary) + `<section class="panel"><div class="panel-header"><div><h2>Suas NFS-e</h2><p>${data.invoiceSummary?.count??data.invoices.length} notas no período consultado · ${envLabel(environment)}</p></div></div><form class="table-tools invoice-filters" id="invoice-filters"><label class="field">Emissão de<input type="date" name="from" value="${esc(invoiceFilters.from)}"></label><label class="field">Até<input type="date" name="to" value="${esc(invoiceFilters.to)}"></label><label class="field">Situação<select name="status">${[['','Todas'],['authorized','Autorizadas'],['cancelled','Canceladas'],['imported','Importadas']].map(([value,label])=>`<option value="${value}" ${invoiceFilters.status===value?'selected':''}>${label}</option>`).join('')}</select></label><button class="primary" type="submit">Filtrar</button><button class="secondary" type="button" id="clear-filters">Limpar</button></form><div class="table-tools"><input class="search" id="invoice-search" type="search" maxlength="200" value="${esc(invoiceFilters.search)}" placeholder="Buscar por número, chave ou tomador" aria-label="Buscar nota"></div><div id="invoice-list"></div></section><p class="footer-note">A lista mostra até 100 notas; os totais consideram todas as notas dos filtros. Datas de emissão no horário de Brasília; data final incluída.</p>`;
     document.querySelector('#refresh').onclick = load;
     document.querySelector('#invoice-filters').onsubmit = async event => {
       event.preventDefault();
@@ -184,13 +196,19 @@ function renderPage() {
       await load();
     };
     document.querySelector('#clear-filters').onclick = () => { invoiceFilters = {from:'',to:'',search:'',status:''}; load(); };
-    const filterList = () => {
-      const term = invoiceFilters.search.toLowerCase();
-      document.querySelector('#invoice-list').innerHTML = invoiceTable(data.invoices.filter(i => String(i.invoice_number).includes(term) || i.access_key?.includes(term) || i.customer_name?.toLocaleLowerCase('pt-BR').includes(term)));
-      bindDocuments();
+    document.querySelector('#invoice-list').innerHTML = invoiceTable(data.invoices);
+    bindDocuments();
+    document.querySelector('#invoice-search').oninput = event => {
+      invoiceFilters.search = event.target.value;
+      clearTimeout(invoiceSearchTimer);
+      invoiceSearchTimer = setTimeout(async()=>{
+        if(page!=='invoices') return;
+        await load();
+        if(page!=='invoices') return;
+        const input=document.querySelector('#invoice-search');
+        if(input){input.focus();input.setSelectionRange(input.value.length,input.value.length);}
+      },350);
     };
-    document.querySelector('#invoice-search').oninput = event => { invoiceFilters.search = event.target.value; filterList(); };
-    filterList();
   } else if (page === 'drafts') {
     content.innerHTML = title('Rascunhos','Revise os dados antes de emitir. Ambiente: '+envLabel(environment)+'.', newButton()) + `<section class="panel"><div class="panel-header"><div><h2>Seus rascunhos</h2><p>Até 100 registros mais recentes.</p></div></div>${data.drafts.length ? `<div class="table-wrap"><table><thead><tr><th>Serviço / criação</th><th>Tomador</th><th>Valor</th><th>Situação</th><th>Ação</th></tr></thead><tbody>${data.drafts.map(d => `<tr><td><strong>${esc((d.settings?.service_description || 'Serviço').slice(0,48))}</strong><div class="minor">${esc(date(d.created_at))}</div></td><td>${esc(customerName(d.customer_id))}</td><td>${money(d.amount_cents)}</td><td>${badge(draftStatus(d))}</td><td><button class="text-button" data-draft="${esc(d.id)}">${draftStatus(d) === 'draft' ? 'Revisar' : 'Ver resultado'} ${icon('arrow')}</button></td></tr>`).join('')}</tbody></table></div>` : empty('Seu próximo serviço começa aqui','Crie um rascunho com valor, serviço e tomador opcional.')}</section>`;
     document.querySelectorAll('[data-draft]').forEach(button => button.onclick = () => reviewDraft(data.drafts.find(d => d.id === button.dataset.draft)));
@@ -211,7 +229,7 @@ function settingsFields(settings) {
 }
 
 function renderNew(content) {
-  content.innerHTML = title('Nova nota de serviço','Prepare os dados e revise. Ambiente: '+envLabel(environment)+'.') + `<div class="steps"><span class="current"><b>1</b> Dados do serviço</span><span>—</span><span><b>2</b> Revisão</span><span>—</span><span><b>3</b> Emissão</span></div><div class="split"><section class="panel"><div class="panel-header"><div><h2>O que foi prestado?</h2><p>Os padrões cadastrados já estão preenchidos.</p></div></div><form id="draft-form" class="panel-body"><label class="field">Valor do serviço (R$)<input name="amount" inputmode="decimal" placeholder="0,00" required autocomplete="off"></label><div class="form-grid">${settingsFields(data.settings)}</div><div class="divider"></div><h2>Quem é o tomador?</h2><label class="check"><input type="checkbox" name="anonymous" checked> Tomador não informado</label><label class="field" id="customer-field" hidden>Selecione o tomador<select name="customer_id"><option value="">Selecione…</option>${data.customers.map(c => `<option value="${esc(c.id)}">${esc(c.name.toLocaleUpperCase('pt-BR'))} · ${esc(doc(c.document))}</option>`).join('')}</select></label><p class="error" role="alert" id="draft-error"></p><button class="primary" type="submit">Salvar e revisar ${icon('arrow')}</button></form></section><aside><div class="panel profile-card"><h3>Resumo do serviço</h3><div class="summary-line"><span>Ambiente</span> ${envLabel(environment)}</div><div class="summary-line"><span>Prestador</span> ${esc(company.name)}</div><div class="summary-line total"><span>Valor do serviço</span><strong id="amount-preview">R$ 0,00</strong></div></div><div class="hint">Salvar um rascunho ainda não emite uma nota. Você poderá conferir os dados antes de confirmar.</div></aside></div>`;
+  content.innerHTML = title('Nova nota de serviço','Prepare os dados e revise. Ambiente: '+envLabel(environment)+'.') + `<div class="steps"><span class="current"><b>1</b> Dados do serviço</span><span>—</span><span><b>2</b> Revisão</span><span>—</span><span><b>3</b> Emissão</span></div><div class="split"><section class="panel"><div class="panel-header"><div><h2>O que foi prestado?</h2><p>Os padrões cadastrados já estão preenchidos.</p></div><button class="primary" type="submit" form="draft-form">Salvar e revisar ${icon('arrow')}</button></div><form id="draft-form" class="panel-body"><div class="payment-row"><label class="field">Valor do serviço (R$)<input name="amount" inputmode="decimal" placeholder="0,00" required autocomplete="off"></label><label class="field">Forma de pagamento<select name="payment_method" required><option value="">Selecione…</option>${paymentMethods.map(([value,label])=>`<option value="${value}">${label}</option>`).join('')}</select></label></div><div class="form-grid">${settingsFields(data.settings)}</div><div class="divider"></div><h2>Quem é o tomador?</h2><label class="check"><input type="checkbox" name="anonymous" checked> Tomador não informado</label><label class="field" id="customer-field" hidden>Selecione o tomador<select name="customer_id"><option value="">Selecione…</option>${data.customers.map(c => `<option value="${esc(c.id)}">${esc(c.name.toLocaleUpperCase('pt-BR'))} · ${esc(doc(c.document))}</option>`).join('')}</select></label><p class="error" role="alert" id="draft-error"></p><button class="primary" type="submit">Salvar e revisar ${icon('arrow')}</button></form></section><aside><div class="panel profile-card"><h3>Resumo do serviço</h3><div class="summary-line"><span>Ambiente</span> ${envLabel(environment)}</div><div class="summary-line"><span>Prestador</span> ${esc(company.name)}</div><div class="summary-line total"><span>Valor do serviço</span><strong id="amount-preview">R$ 0,00</strong></div></div><div class="hint">Salvar um rascunho ainda não emite uma nota. Você poderá conferir os dados antes de confirmar.</div></aside></div>`;
   const form = document.querySelector('#draft-form');
   form.elements.anonymous.onchange = () => {
     document.querySelector('#customer-field').hidden = form.elements.anonymous.checked;
@@ -223,16 +241,16 @@ function renderNew(content) {
   };
   form.onsubmit = async event => {
     event.preventDefault();
-    const button = form.querySelector('[type=submit]');
-    button.disabled = true;
+    const buttons = document.querySelectorAll('[form="draft-form"], #draft-form [type=submit]');
+    buttons.forEach(button=>button.disabled=true);
     try {
       const settings = readSettings(form);
-      const draft = await api('/drafts', {method:'POST',body:{environment,amount_cents:parseAmount(form.elements.amount.value),customer_id:form.elements.anonymous.checked ? null : form.elements.customer_id.value,overrides:settings}});
+      const draft = await api('/drafts', {method:'POST',body:{environment,payment_method:form.elements.payment_method.value,amount_cents:parseAmount(form.elements.amount.value),customer_id:form.elements.anonymous.checked ? null : form.elements.customer_id.value,overrides:settings}});
       data.drafts.unshift(draft);
       navigate('drafts');
       reviewDraft(draft);
     } catch (error) { const node = document.querySelector('#draft-error'); if(node) node.textContent = error.message; }
-    finally { button.disabled = false; }
+    finally { buttons.forEach(button=>button.disabled=false); }
   };
 }
 
@@ -301,7 +319,7 @@ function reviewDraft(draft) {
   const localDay = new Date(today.getTime() - today.getTimezoneOffset()*60000).toISOString().slice(0,10);
   // Freeze issue time before review; never subtract time from the clock.
   const issuedAt = today.toISOString().replace(/\.\d{3}Z$/,'Z');
-  dialog.innerHTML = `<h2 id="dialog-title">${production?'Confirme a emissão em PRODUÇÃO':'Revise sua nota de teste'}</h2><p class="subtle">Confira as informações antes de confirmar a emissão.</p><div class="review-card"><dl class="details"><div><dt>PRESTADOR</dt><dd>${esc(company.name)}</dd></div><div><dt>VALOR</dt><dd><strong>${money(draft.amount_cents)}</strong></dd></div><div><dt>TOMADOR</dt><dd>${esc(customerName(draft.customer_id))}</dd></div><div><dt>CÓDIGO DO SERVIÇO</dt><dd>${esc(draft.settings?.service_code)}</dd></div></dl><p class="detail-text">${esc(draft.settings?.service_description)}</p></div><form id="emit-form"><label class="field">Competência<input name="competence" type="date" value="${localDay}" max="${localDay}" required></label><div class="hint">${envHint(draftEnvironment)} Em caso de resultado inconclusivo, consulte a tentativa antes de emitir outra nota.</div>${production?'<label class="check"><input name="confirm_production" type="checkbox" required> Conferi o serviço, o tomador e o valor. Confirmo a emissão de uma NFS-e real com validade fiscal.</label>':''}<p class="error" id="emit-error" role="alert"></p><div class="actions"><button class="secondary" type="button" data-close>Voltar</button><button class="primary" type="submit">${production?'Emitir nota real em produção':'Emitir em homologação'}</button></div></form>`;
+  dialog.innerHTML = `<h2 id="dialog-title">${production?'Confirme a emissão em PRODUÇÃO':'Revise sua nota de teste'}</h2><p class="subtle">Confira as informações antes de confirmar a emissão.</p><div class="review-card"><dl class="details"><div><dt>PRESTADOR</dt><dd>${esc(company.name)}</dd></div><div><dt>VALOR</dt><dd><strong>${money(draft.amount_cents)}</strong></dd></div><div><dt>TOMADOR</dt><dd>${esc(customerName(draft.customer_id))}</dd></div><div><dt>CÓDIGO DO SERVIÇO</dt><dd>${esc(draft.settings?.service_code)}</dd></div><div><dt>FORMA DE PAGAMENTO</dt><dd>${esc(paymentLabel(draft.payment_method))}</dd></div></dl><p class="detail-text">${esc(draft.settings?.service_description)}</p></div><form id="emit-form"><label class="field">Competência<input name="competence" type="date" value="${localDay}" max="${localDay}" required></label><div class="hint">${envHint(draftEnvironment)} Em caso de resultado inconclusivo, consulte a tentativa antes de emitir outra nota.</div>${production?'<label class="check"><input name="confirm_production" type="checkbox" required> Conferi o serviço, o tomador e o valor. Confirmo a emissão de uma NFS-e real com validade fiscal.</label>':''}<p class="error" id="emit-error" role="alert"></p><div class="actions"><button class="secondary" type="button" data-close>Voltar</button><button class="primary" type="submit">${production?'Emitir nota real em produção':'Emitir em homologação'}</button></div></form>`;
   dialog.showModal();
   dialog.querySelector('[data-close]').onclick = () => dialog.close();
   dialog.querySelector('form').onsubmit = async event => {

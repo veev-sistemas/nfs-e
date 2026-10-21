@@ -195,7 +195,7 @@ var
   Amount: Int64;
   Guid: TGUID;
   InvoiceId, DraftId, InvoiceXml: string;
-  IssuedAt, Competence, DateFrom, DateTo, Environment, StatusFilter: string;
+  IssuedAt, Competence, DateFrom, DateTo, Environment, StatusFilter, PaymentMethod, SearchFilter, InvoiceSQL: string;
   ParsedDate: TDateTime;
   PdfBytes: TBytes;
 
@@ -368,8 +368,18 @@ begin
           raise EApiError.Create(422, 'overrides deve ser objeto.');
         Settings := TJSONObject(V);
         if Settings <> nil then ValidateSettings(Settings);
-        Run('insert into drafts(company_id, customer_id, amount_cents, settings_snapshot,environment) ' +
-          'select f.company_id, c.id, :amount, f.settings || cast(:overrides as jsonb),:environment ' +
+        PaymentMethod := '';
+        V := Body.GetValue('payment_method');
+        if (V <> nil) and not (V is TJSONNull) then
+        begin
+          if not (V is TJSONString) then raise EApiError.Create(422, 'Forma de pagamento deve ser texto.');
+          PaymentMethod := RequiredString(Body, 'payment_method');
+          if (PaymentMethod<>'dinheiro') and (PaymentMethod<>'pix') and (PaymentMethod<>'boleto') and
+             (PaymentMethod<>'cartao_credito') and (PaymentMethod<>'cartao_debito') then
+            raise EApiError.Create(422, 'Forma de pagamento invalida.');
+        end;
+        Run('insert into drafts(company_id, customer_id, amount_cents, settings_snapshot,environment,payment_method) ' +
+          'select f.company_id, c.id, :amount, f.settings || cast(:overrides as jsonb),:environment,nullif(:payment,'''') ' +
           'from fiscal_defaults f left join customers c on c.company_id = f.company_id ' +
           'and c.id = cast(nullif(:customer, '''') as uuid) ' +
           'where f.company_id = cast(:company as uuid) ' +
@@ -378,9 +388,10 @@ begin
           'and length(trim(coalesce((f.settings || cast(:overrides as jsonb))->>''service_description'', ''''))) > 0 ' +
           'and length(trim(coalesce((f.settings || cast(:overrides as jsonb))->>''tax_regime'', ''''))) > 0 ' +
           'returning jsonb_build_object(''id'', id, ''customer_id'', customer_id, ' +
-          '''amount_cents'', amount_cents, ''settings'', settings_snapshot, ''status'', status,''environment'',environment)::text');
+          '''amount_cents'', amount_cents, ''settings'', settings_snapshot, ''status'', status,''environment'',environment,''payment_method'',payment_method)::text');
         Q.ParamByName('environment').AsWideString:=Environment;
         Q.ParamByName('amount').AsLargeInt := Amount;
+        Q.ParamByName('payment').AsWideString := PaymentMethod;
         Q.ParamByName('customer').AsWideString := Customer;
         if Settings = nil then Q.ParamByName('overrides').AsWideString := '{}'
         else Q.ParamByName('overrides').AsWideString := Settings.ToJSON;
@@ -395,7 +406,7 @@ begin
         Environment:=Request.QueryFields.Values['environment'];
         if (Environment<>'') and (Environment<>'homologacao') and (Environment<>'producao') then raise EApiError.Create(422,'Ambiente invalido.');
         Run('select coalesce(jsonb_agg(to_jsonb(d)), ''[]''::jsonb)::text from ' +
-          '(select r.id, r.customer_id, r.amount_cents, r.settings_snapshot as settings, r.status, r.created_at,r.environment, ' +
+          '(select r.id, r.customer_id, r.amount_cents, r.settings_snapshot as settings, r.status, r.created_at,r.environment, r.payment_method, ' +
           'a.id as attempt_id, a.status as attempt_status, a.invoice_id ' +
           'from drafts r left join emission_attempts a on a.company_id=r.company_id and a.draft_id=r.id ' +
           'where r.company_id = cast(:company as uuid) and (:environment='''' or r.environment=:environment) order by r.created_at desc, r.id limit 100) d');
@@ -485,9 +496,11 @@ begin
           raise EApiError.Create(422,'Data final invalida. Use AAAA-MM-DD.');
         if (DateFrom<>'') and (DateTo<>'') and (DateFrom>DateTo) then
           raise EApiError.Create(422,'A data inicial deve ser anterior ou igual a data final.');
-        Run('select coalesce(jsonb_agg(to_jsonb(i)), ''[]''::jsonb)::text from ' +
-          '(select i.id, i.draft_id, i.environment, i.access_key, i.invoice_number, i.issuer_document, ' +
-          'i.amount_cents, i.status, i.source, i.imported_at, i.issued_at, '+
+        SearchFilter:=Trim(Request.QueryFields.Values['search']);
+        if Length(SearchFilter)>200 then raise EApiError.Create(422,'Busca deve ter ate 200 caracteres.');
+        InvoiceSQL:='with base as (' +
+          'select i.id, i.draft_id, i.environment, i.access_key, i.invoice_number, i.issuer_document, ' +
+          'i.amount_cents, i.status, i.source, i.imported_at, i.issued_at, d.payment_method, '+
           '(select a.status from cancellation_attempts a where a.invoice_id=i.id and a.company_id=i.company_id order by a.created_at desc,a.id desc limit 1) as cancellation_status, '+
           'coalesce(nullif(x.customer_name,''''),c.name) as customer_name '+
           'from invoices i left join drafts d on d.id=i.draft_id and d.company_id=i.company_id '+
@@ -499,7 +512,25 @@ begin
           'and (:environment='''' or i.environment=:environment) '+
           'and (:date_from='''' or issued_at >= (cast(nullif(:date_from,'''') as date)::timestamp at time zone ''America/Sao_Paulo'')) '+
           'and (:date_to='''' or issued_at < ((cast(nullif(:date_to,'''') as date)+1)::timestamp at time zone ''America/Sao_Paulo'')) '+
-          'order by i.issued_at desc, i.id limit 100) i');
+          ') ';
+
+        InvoiceSQL:=InvoiceSQL+
+          ', filtered as (select * from base where :search='''' or position(lower(:search) in lower(coalesce(invoice_number,'''')||'' ''||coalesce(access_key,'''')||'' ''||coalesce(customer_name,'''')))>0), '+
+          'listed as (select * from filtered order by issued_at desc,id limit 100) ';
+        if Request.QueryFields.Values['include_totals']='1' then
+          InvoiceSQL:=InvoiceSQL+
+            'select jsonb_build_object(''invoices'',coalesce((select jsonb_agg(to_jsonb(l) order by l.issued_at desc,l.id) from listed l),''[]''::jsonb),'+
+            '''summary'',jsonb_build_object(''count'',(select count(*) from filtered),'+
+            '''total_cents'',(select coalesce(sum(amount_cents) filter(where status<>''cancelled''),0)::text from filtered),'+
+            '''cancelled_count'',(select count(*) from filtered where status=''cancelled''),'+
+            '''cancelled_cents'',(select coalesce(sum(amount_cents),0)::text from filtered where status=''cancelled''),'+
+            '''by_payment'',coalesce((select jsonb_agg(to_jsonb(p) order by p.payment_method) from '+
+            '(select coalesce(payment_method,''nao_informado'') as payment_method,count(*) as count,sum(amount_cents)::text as total_cents '+
+            'from filtered where status<>''cancelled'' group by coalesce(payment_method,''nao_informado'')) p),''[]''::jsonb)))::text'
+        else
+          InvoiceSQL:=InvoiceSQL+'select coalesce(jsonb_agg(to_jsonb(l) order by l.issued_at desc,l.id),''[]''::jsonb)::text from listed l';
+        Run(InvoiceSQL);
+        Q.ParamByName('search').AsWideString:=SearchFilter;
         Q.ParamByName('status').AsWideString:=StatusFilter;
         Q.ParamByName('date_from').AsWideString:=DateFrom;
         Q.ParamByName('date_to').AsWideString:=DateTo;

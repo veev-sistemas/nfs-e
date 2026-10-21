@@ -107,7 +107,7 @@ class Handler(SimpleHTTPRequestHandler):
         elif path == '/drafts':
             if self.command == 'POST':
                 draft = dict(id=str(uuid.uuid4()),customer_id=body.get('customer_id'),amount_cents=body['amount_cents'],
-                    settings=dict(SETTINGS,**body.get('overrides',{})),status='draft',created_at=now(),environment=body.get('environment','homologacao'))
+                    payment_method=body.get('payment_method'),settings=dict(SETTINGS,**body.get('overrides',{})),status='draft',created_at=now(),environment=body.get('environment','homologacao'))
                 DRAFTS.insert(0,draft)
                 self.respond(200,draft)
             else: self.respond(200,[d for d in DRAFTS if not query.get('environment') or d.get('environment','homologacao')==query['environment'][0]])
@@ -119,7 +119,7 @@ class Handler(SimpleHTTPRequestHandler):
                 self.respond(200,ATTEMPTS[draft['attempt_id']])
                 return
             attempt = dict(id=str(uuid.uuid4()),draft_id=draft['id'],environment='homologacao',status='authorized',dps_number=len(ATTEMPTS)+1,dps_series='901',result={'errors':[]})
-            invoice = dict(id=str(uuid.uuid4()),draft_id=draft['id'],environment='homologacao',access_key='3'*50,customer_name=next((c['name'] for c in CUSTOMERS if c['id']==draft.get('customer_id')),None),invoice_number=str(max(int(n['invoice_number']) for n in INVOICES)+1),issuer_document=COMPANY['document'],amount_cents=draft['amount_cents'],status='authorized_homologation',source='sefin_api',imported_at=now())
+            invoice = dict(id=str(uuid.uuid4()),draft_id=draft['id'],environment='homologacao',access_key='3'*50,payment_method=draft.get('payment_method'),customer_name=next((c['name'] for c in CUSTOMERS if c['id']==draft.get('customer_id')),None),invoice_number=str(max(int(n['invoice_number']) for n in INVOICES)+1),issuer_document=COMPANY['document'],amount_cents=draft['amount_cents'],status='authorized_homologation',source='sefin_api',imported_at=now())
             attempt['invoice_id'] = invoice['id']
             ATTEMPTS[attempt['id']] = attempt
             draft.update(attempt_id=attempt['id'],attempt_status=attempt['status'])
@@ -137,8 +137,19 @@ class Handler(SimpleHTTPRequestHandler):
                 status=query.get('status',[''])[0]
                 if status and status!=note['status'] and not (status=='authorized' and note['status'].startswith('authorized_')): continue
                 day=datetime.fromisoformat(note.get('issued_at') or note['imported_at']).astimezone(ZoneInfo('America/Sao_Paulo')).date().isoformat()
+                term=query.get('search',[''])[0].lower()
+                if term and term not in ' '.join(str(note.get(k) or '') for k in ['invoice_number','access_key','customer_name']).lower(): continue
                 if (not date_from or day>=date_from) and (not date_to or day<=date_to): filtered.append(note)
-            self.respond(200,filtered)
+            if query.get('include_totals') == ['1']:
+                valid=[n for n in filtered if n['status']!='cancelled']
+                cancelled=[n for n in filtered if n['status']=='cancelled']
+                groups={}
+                for n in valid:
+                    key=n.get('payment_method') or 'nao_informado'
+                    group=groups.setdefault(key,dict(payment_method=key,count=0,total_cents=0))
+                    group['count']+=1; group['total_cents']+=n['amount_cents']
+                self.respond(200,{'invoices':filtered[:100],'summary':{'count':len(filtered),'total_cents':sum(n['amount_cents'] for n in valid),'cancelled_count':len(cancelled),'cancelled_cents':sum(n['amount_cents'] for n in cancelled),'by_payment':list(groups.values())}})
+            else: self.respond(200,filtered[:100])
         elif path.endswith('/cancel'):
             self.respond(422,{'error':'Cancelamento real indisponível na demonstração. Nenhuma transmissão.'})
         elif path.endswith('/xml'): self.respond(200,b'<?xml version="1.0"?><demo>Documento ficticio de QA</demo>','application/xml')
