@@ -127,7 +127,10 @@ async function certificateForm(company) {
 
 async function numberingForm(company) {
   try {
-    const config=await api('/companies/'+company.id+'/numbering');
+    const [config, emission]=await Promise.all([
+      api('/companies/'+company.id+'/numbering'),
+      api('/companies/'+company.id+'/production')
+    ]);
     dialog.innerHTML=`<h2 id="admin-dialog-title">Numeração da DPS</h2><p>${esc(company.name)}</p><p class="subtle">O número da NFS-e é atribuído pelo sistema nacional. Configure aqui a próxima DPS da mesma série, considerando também outros emissores.</p><form><label class="field">Ambiente<select name="environment"><option value="homologacao">Homologação</option><option value="producao">Produção</option></select></label><label class="field">Série da DPS<input name="series" required pattern="(0|[1-9][0-9]{0,4})" maxlength="5" inputmode="numeric"></label><p class="subtle" id="sequence-current"></p><label class="field">Próximo número da DPS<input name="next_number" required pattern="[1-9][0-9]{0,14}" maxlength="15" inputmode="numeric"></label><p class="subtle">Números reservados não serão reutilizados. A numeração não libera a emissão: confira também a ação Produção.</p><label class="check"><input name="confirmed" type="checkbox" required> Conferi a última DPS desta série e a utilização em outros emissores.</label><p class="error" id="numbering-error" role="alert"></p><div class="actions"><button type="button" class="secondary" data-close>Cancelar</button><button type="submit" class="primary">Salvar numeração</button></div></form>`;
     dialog.showModal();const form=dialog.querySelector('form');let expected=null;
     const update=()=>{
@@ -135,9 +138,17 @@ async function numberingForm(company) {
       expected=seq?.next_number??null;form.elements.next_number.value=expected??'1';form.elements.confirmed.checked=false;
       dialog.querySelector('#sequence-current').textContent=seq?'Próximo número registrado: '+seq.next_number:'Série ainda não configurada neste ambiente.';
     };
-    form.elements.series.value=config.homologation_series||'901';update();
+    const selectEnvironment=()=>{
+      const environment=form.elements.environment.value;
+      const saved=config.sequences.filter(s=>s.environment===environment);
+      const configured=environment==='homologacao'?config.homologation_series:emission.production_series;
+      form.elements.series.value=configured??(saved.length===1?saved[0].series:'');
+      update();
+    };
+    form.elements.environment.value=emission.active_environment==='producao'?'producao':'homologacao';
     form.elements.series.oninput=update;
-    form.elements.environment.onchange=()=>{form.elements.series.value=form.elements.environment.value==='homologacao'?(config.homologation_series||'901'):'';update();};
+    form.elements.environment.onchange=selectEnvironment;
+    selectEnvironment();
     form.querySelector('[data-close]').onclick=()=>dialog.close();
     form.onsubmit=async event=>{
       event.preventDefault();const button=form.querySelector('[type=submit]');button.disabled=true;
