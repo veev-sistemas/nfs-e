@@ -1,0 +1,35 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+const source=readFileSync(new URL('../dist/print-totals.js',import.meta.url),'utf8');
+const {totalsReport,printTotalsReport}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const helpers={esc,money:v=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(v)/100),date:()=> '22/10/2026, 12:00',envLabel:v=>v==='producao'?'Produção':'Homologação',paymentMethods:[['dinheiro','Dinheiro'],['pix','PIX'],['boleto','Boleto'],['cartao_credito','Cartão de crédito'],['cartao_debito','Cartão de débito']]};
+const snapshot={company:{name:'EMPRESA & EXEMPLO',document:'12345678000199'},environment:'producao',filters:{from:'2026-10-01',to:'2026-10-22',status:'authorized',search:'<script>teste</script>'},summary:{count:104,total_cents:'374500',cancelled_count:2,cancelled_cents:'5000',by_payment:[{payment_method:'cartao_credito',count:2,total_cents:'350000'},{payment_method:'nao_informado',count:100,total_cents:'24500'}]},generatedAt:'2026-10-22T15:00:00Z'};
+const html=totalsReport(snapshot,helpers);
+assert(html.includes('R$&nbsp;3.745,00')||html.includes('R$\u00a03.745,00'));
+assert(html.includes('R$\u00a03.500,00')&&html.includes('R$\u00a0245,00'));
+assert(!html.includes('Quantidade de notas')&&!html.includes('<th>Qtd.</th>'));
+assert(!html.includes('NFS-e 104'));
+assert(html.includes('01/10/2026')&&html.includes('22/10/2026')&&html.includes('Autorizadas'));
+assert(html.includes('Produção')&&html.includes('12.345.678/0001-99'));
+assert(html.includes('&lt;script&gt;')&&!html.includes('<script>'));
+assert(html.includes('EMPRESA &amp; EXEMPLO'));
+assert.equal((html.match(/<tr>/g)||[]).length,7);
+assert(!html.includes('Canceladas (2)'));
+assert(!html.includes('R$\u00a050,00'));
+const empty=totalsReport({...snapshot,summary:{count:0,total_cents:'0',cancelled_count:0,cancelled_cents:'0',by_payment:[]}},helpers);
+assert(!empty.includes('NaN')&&empty.includes('R$\u00a00,00'));
+
+const body=[],head=[];let printCount=0,afterPrint;
+globalThis.document={fonts:{ready:Promise.resolve()},body:{append:n=>body.push(n)},head:{append:n=>head.push(n)},createElement:()=>({className:'',innerHTML:'',textContent:'',getBoundingClientRect:()=>({height:900}),remove(){const list=body.includes(this)?body:head;const i=list.indexOf(this);if(i>=0)list.splice(i,1);}})};
+globalThis.window={addEventListener:(event,callback)=>{assert.equal(event,'afterprint');afterPrint=callback;},removeEventListener:()=>{},print:()=>{printCount++;assert.equal(body.length,1);assert(body[0].innerHTML.includes('Resumo por forma de pagamento'));}};
+await printTotalsReport(html,'80mm');
+assert.equal(printCount,1);assert.equal(body[0].className,'report-receipt');
+assert.match(head[0].textContent,/size: 80mm 249mm/); // variable roll length + printer margins
+afterPrint();assert.equal(body.length,0);assert.equal(head.length,0);
+await printTotalsReport(html,'a4');assert.match(head[0].textContent,/size: A4 portrait/);afterPrint();
+await assert.rejects(()=>printTotalsReport(html,'unknown'),/Formato/);
+window.print=()=>{throw Error('Impressora indisponível');};
+await assert.rejects(()=>printTotalsReport(html,'a4'),/Impressora/);
+assert.equal(body.length,0);assert.equal(head.length,0);
+console.log('OK: totais completos, filtros, segurança do texto, A4, bobina com comprimento variável e limpeza ao cancelar/falhar.');

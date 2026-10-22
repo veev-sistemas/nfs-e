@@ -1,3 +1,4 @@
+import {totalsReport, printTotalsReport} from './print-totals.js';
 const app = document.querySelector('#app');
 const dialog = document.querySelector('#dialog');
 let token = null;
@@ -169,7 +170,32 @@ function invoiceTotals(summary) {
     const item=summary.by_payment.find(p=>p.payment_method===method)||{count:0,total_cents:0};
     return `<article class="payment-total"><span>${label}</span><strong>${money(item.total_cents)}</strong><small>${item.count} nota(s)</small></article>`;
   }).join('');
-  return `<section class="panel invoice-totals" aria-label="Totais das notas filtradas"><div class="panel-header"><div><h2>Totais da consulta</h2><p>Todo o resultado dos filtros, incluindo a busca. Canceladas não entram no total geral nem nos totais por pagamento.</p></div></div><div class="totals-main"><div><span>Quantidade de notas</span><strong>${summary.count}</strong></div><div><span>Total geral (sem canceladas)</span><strong>${money(summary.total_cents)}</strong></div><div><span>Canceladas: ${summary.cancelled_count}</span><strong>${money(summary.cancelled_cents)}</strong></div></div><div class="payment-totals">${byPayment}</div><p class="footer-note">Forma de pagamento informada no lançamento; não representa confirmação de recebimento. Notas antigas ou importadas podem constar como não informado.</p></section>`;
+  return `<section class="panel invoice-totals" aria-label="Totais das notas filtradas"><div class="panel-header"><div><h2>Totais da consulta</h2><p>Todo o resultado dos filtros, incluindo a busca. Canceladas não entram no total geral nem nos totais por pagamento.</p></div><div class="actions report-actions"><button class="secondary" data-print-totals="a4">Imprimir A4</button><button class="secondary" data-print-totals="80mm">Imprimir bobina 80 mm</button></div></div><div class="totals-main"><div><span>Quantidade de notas</span><strong>${summary.count}</strong></div><div><span>Total geral (sem canceladas)</span><strong>${money(summary.total_cents)}</strong></div><div><span>Canceladas: ${summary.cancelled_count}</span><strong>${money(summary.cancelled_cents)}</strong></div></div><div class="payment-totals">${byPayment}</div><p class="footer-note">Forma de pagamento informada no lançamento; não representa confirmação de recebimento. Notas antigas ou importadas podem constar como não informado.</p></section>`;
+}
+
+async function previewInvoiceTotals(format) {
+  const companySnapshot = company && {...company};
+  const environmentSnapshot = environment;
+  const filters = {...invoiceFilters};
+  const buttons = document.querySelectorAll('[data-print-totals]');
+  buttons.forEach(button=>button.disabled=true);
+  try {
+    const result = await api('/invoices?' + new URLSearchParams({date_from:filters.from,date_to:filters.to,status:filters.status,environment:environmentSnapshot,search:filters.search,include_totals:1}));
+    if (!company || company.id!==companySnapshot?.id) return;
+    if (!result.summary) throw new Error('Não foi possível obter os totais para impressão. Atualize a consulta.');
+    const html = totalsReport({company:companySnapshot,environment:environmentSnapshot,filters,summary:result.summary,generatedAt:new Date().toISOString()}, {esc,money,date,envLabel,paymentMethods});
+    const receipt = format==='80mm';
+    dialog.classList.add('totals-print-dialog');
+    dialog.innerHTML = `<h2 id="dialog-title">${receipt?'Impressão em bobina 80 mm':'Impressão A4'}</h2><p class="subtle">${receipt?'Selecione a impressora e o papel de 80 mm. Desative cabeçalhos e rodapés do navegador.':'Selecione o papel A4, orientação retrato. Você também pode salvar como PDF.'}</p><div class="totals-print-preview"><div class="${receipt?'report-receipt':'report-a4'}">${html}</div></div><div class="actions"><button class="secondary" data-close>Fechar</button><button class="primary" id="print-totals-confirm">Imprimir</button></div>`;
+    const close = ()=>{dialog.close();dialog.classList.remove('totals-print-dialog');};
+    dialog.querySelector('[data-close]').onclick=close;
+    dialog.addEventListener('close',()=>dialog.classList.remove('totals-print-dialog'),{once:true});
+    dialog.querySelector('#print-totals-confirm').onclick=async()=>{
+      try {await printTotalsReport(html,format);} catch(error){notice(error.message);}
+    };
+    dialog.showModal();
+  } catch(error) { notice(error.message); }
+  finally {buttons.forEach(button=>{if(button.isConnected)button.disabled=false;});}
 }
 
 function invoiceTable(invoices) {
@@ -186,6 +212,7 @@ function renderPage() {
       `<div class="banner">${icon('shield')} ${envHint(environment)} ${environment==='producao'&&!emissionConfig.production_available?'A emissão está bloqueada. Consulte o administrador.':''}</div><div class="stats"><article class="stat"><span class="eyebrow">Notas disponíveis</span><span class="stat-icon">${icon('invoices')}</span><strong>${data.invoices.length}</strong><span class="subtle">Notas na consulta atual</span></article><article class="stat"><span class="eyebrow">Valor das notas</span><span class="stat-icon">${icon('check')}</span><strong>${money(data.invoices.reduce((sum,n) => sum + Number(n.amount_cents),0))}</strong><span class="subtle">${envLabel(environment)}</span></article><article class="stat"><span class="eyebrow">Rascunhos pendentes</span><span class="stat-icon">${icon('drafts')}</span><strong>${pending}</strong><span class="subtle">Prontos para revisar</span></article></div><section class="panel"><div class="panel-header"><div><h2>Últimas notas</h2><p>Documentos e informações em um só lugar.</p></div><button class="text-button" data-go="invoices">Ver todas ${icon('arrow')}</button></div>${invoiceTable(data.invoices.slice(0,5))}</section><p class="footer-note">Os indicadores consideram os últimos 100 registros retornados pelo sistema.</p>`;
   } else if (page === 'invoices') {
     content.innerHTML = title('Notas fiscais','Consulte por data de emissão e baixe os documentos.', '<button class="secondary" id="refresh">Atualizar lista</button>') + invoiceTotals(data.invoiceSummary) + `<section class="panel"><div class="panel-header"><div><h2>Suas NFS-e</h2><p>${data.invoiceSummary?.count??data.invoices.length} notas no período consultado · ${envLabel(environment)}</p></div></div><form class="table-tools invoice-filters" id="invoice-filters"><label class="field">Emissão de<input type="date" name="from" value="${esc(invoiceFilters.from)}"></label><label class="field">Até<input type="date" name="to" value="${esc(invoiceFilters.to)}"></label><label class="field">Situação<select name="status">${[['','Todas'],['authorized','Autorizadas'],['cancelled','Canceladas'],['imported','Importadas']].map(([value,label])=>`<option value="${value}" ${invoiceFilters.status===value?'selected':''}>${label}</option>`).join('')}</select></label><button class="primary" type="submit">Filtrar</button><button class="secondary" type="button" id="clear-filters">Limpar</button></form><div class="table-tools"><input class="search" id="invoice-search" type="search" maxlength="200" value="${esc(invoiceFilters.search)}" placeholder="Buscar por número, chave ou tomador" aria-label="Buscar nota"></div><div id="invoice-list"></div></section><p class="footer-note">A lista mostra até 100 notas; os totais consideram todas as notas dos filtros. Datas de emissão no horário de Brasília; data final incluída.</p>`;
+    document.querySelectorAll('[data-print-totals]').forEach(button=>button.onclick=()=>previewInvoiceTotals(button.dataset.printTotals));
     document.querySelector('#refresh').onclick = load;
     document.querySelector('#invoice-filters').onsubmit = async event => {
       event.preventDefault();
