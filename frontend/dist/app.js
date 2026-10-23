@@ -256,12 +256,20 @@ function settingsFields(settings) {
 }
 
 function renderNew(content) {
-  content.innerHTML = title('Nova nota de serviço','Prepare os dados e revise. Ambiente: '+envLabel(environment)+'.') + `<div class="steps"><span class="current"><b>1</b> Dados do serviço</span><span>—</span><span><b>2</b> Revisão</span><span>—</span><span><b>3</b> Emissão</span></div><div class="split"><section class="panel"><div class="panel-header"><div><h2>O que foi prestado?</h2><p>Os padrões cadastrados já estão preenchidos.</p></div><button class="primary" type="submit" form="draft-form">Salvar e revisar ${icon('arrow')}</button></div><form id="draft-form" class="panel-body"><div class="payment-row"><label class="field">Valor do serviço (R$)<input name="amount" inputmode="decimal" placeholder="0,00" required autocomplete="off"></label><label class="field">Forma de pagamento<select name="payment_method" required><option value="">Selecione…</option>${paymentMethods.map(([value,label])=>`<option value="${value}">${label}</option>`).join('')}</select></label></div><div class="form-grid">${settingsFields(data.settings)}</div><div class="divider"></div><h2>Quem é o tomador?</h2><label class="check"><input type="checkbox" name="anonymous" checked> Tomador não informado</label><label class="field" id="customer-field" hidden>Selecione o tomador<select name="customer_id"><option value="">Selecione…</option>${data.customers.map(c => `<option value="${esc(c.id)}">${esc(c.name.toLocaleUpperCase('pt-BR'))} · ${esc(doc(c.document))}</option>`).join('')}</select></label><p class="error" role="alert" id="draft-error"></p><button class="primary" type="submit">Salvar e revisar ${icon('arrow')}</button></form></section><aside><div class="panel profile-card"><h3>Resumo do serviço</h3><div class="summary-line"><span>Ambiente</span> ${envLabel(environment)}</div><div class="summary-line"><span>Prestador</span> ${esc(company.name)}</div><div class="summary-line total"><span>Valor do serviço</span><strong id="amount-preview">R$ 0,00</strong></div></div><div class="hint">Salvar um rascunho ainda não emite uma nota. Você poderá conferir os dados antes de confirmar.</div></aside></div>`;
+  content.innerHTML = title('Nova nota de serviço','Prepare os dados e revise. Ambiente: '+envLabel(environment)+'.') + `<div class="steps"><span class="current"><b>1</b> Dados do serviço</span><span>—</span><span><b>2</b> Revisão</span><span>—</span><span><b>3</b> Emissão</span></div><div class="split"><section class="panel"><div class="panel-header"><div><h2>O que foi prestado?</h2><p>Os padrões cadastrados já estão preenchidos.</p></div><button class="primary" type="submit" form="draft-form">Salvar e revisar ${icon('arrow')}</button></div><form id="draft-form" class="panel-body"><div class="payment-row"><label class="field">Valor do serviço (R$)<input name="amount" inputmode="decimal" placeholder="0,00" required autocomplete="off"></label><label class="field">Forma de pagamento<select name="payment_method" required><option value="">Selecione…</option>${paymentMethods.map(([value,label])=>`<option value="${value}">${label}</option>`).join('')}</select></label></div><div class="form-grid">${settingsFields(data.settings)}</div><div class="divider"></div><div class="customer-heading"><h2>Quem é o tomador?</h2><button class="secondary" type="button" id="draft-new-customer">Cadastrar tomador</button></div><label class="check"><input type="checkbox" name="inform_customer"> Informar tomador</label><label class="field" id="customer-field" hidden>Selecione o tomador<select name="customer_id"><option value="">Selecione…</option>${data.customers.map(c => `<option value="${esc(c.id)}">${esc(c.name.toLocaleUpperCase('pt-BR'))} · ${esc(doc(c.document))}</option>`).join('')}</select></label><p class="error" role="alert" id="draft-error"></p><button class="primary" type="submit">Salvar e revisar ${icon('arrow')}</button></form></section><aside><div class="panel profile-card"><h3>Resumo do serviço</h3><div class="summary-line"><span>Ambiente</span> ${envLabel(environment)}</div><div class="summary-line"><span>Prestador</span> ${esc(company.name)}</div><div class="summary-line total"><span>Valor do serviço</span><strong id="amount-preview">R$ 0,00</strong></div></div><div class="hint">Salvar um rascunho ainda não emite uma nota. Você poderá conferir os dados antes de confirmar.</div></aside></div>`;
   const form = document.querySelector('#draft-form');
-  form.elements.anonymous.onchange = () => {
-    document.querySelector('#customer-field').hidden = form.elements.anonymous.checked;
-    form.elements.customer_id.required = !form.elements.anonymous.checked;
+  form.elements.inform_customer.onchange = () => {
+    document.querySelector('#customer-field').hidden = !form.elements.inform_customer.checked;
+    form.elements.customer_id.required = form.elements.inform_customer.checked;
   };
+  document.querySelector('#draft-new-customer').onclick = () => customerForm(customer => {
+    data.customers.push(customer);
+    const option = new Option(`${customer.name.toLocaleUpperCase('pt-BR')} · ${doc(customer.document)}`, customer.id);
+    form.elements.customer_id.add(option);
+    form.elements.customer_id.value = customer.id;
+    form.elements.inform_customer.checked = true;
+    form.elements.inform_customer.onchange();
+  });
   form.elements.amount.oninput = () => {
     try { document.querySelector('#amount-preview').textContent = money(parseAmount(form.elements.amount.value)); }
     catch { document.querySelector('#amount-preview').textContent = '—'; }
@@ -272,7 +280,7 @@ function renderNew(content) {
     buttons.forEach(button=>button.disabled=true);
     try {
       const settings = readSettings(form);
-      const draft = await api('/drafts', {method:'POST',body:{environment,payment_method:form.elements.payment_method.value,amount_cents:parseAmount(form.elements.amount.value),customer_id:form.elements.anonymous.checked ? null : form.elements.customer_id.value,overrides:settings}});
+      const draft = await api('/drafts', {method:'POST',body:{environment,payment_method:form.elements.payment_method.value,amount_cents:parseAmount(form.elements.amount.value),customer_id:form.elements.inform_customer.checked ? form.elements.customer_id.value : null,overrides:settings}});
       data.drafts.unshift(draft);
       navigate('drafts');
       reviewDraft(draft);
@@ -312,7 +320,7 @@ async function saveSettings(event) {
   finally { button.disabled = false; }
 }
 
-function customerForm() {
+function customerForm(onCreated) {
   dialog.innerHTML = `<h2 id="dialog-title">Cadastrar tomador</h2><p class="subtle">Informe os dados da pessoa ou empresa.</p><form id="customer-form"><label class="field">Nome ou razão social<input name="name" class="uppercase" required maxlength="500" autocomplete="name"></label><label class="field">CPF ou CNPJ<input name="document" required inputmode="numeric" maxlength="18"></label><p class="error" id="customer-error" role="alert"></p><div class="actions"><button class="secondary" type="button" data-close>Cancelar</button><button class="primary" type="submit">Cadastrar tomador</button></div></form>`;
   dialog.showModal();
   const nameInput = dialog.querySelector('input[name=name]');
@@ -329,7 +337,7 @@ function customerForm() {
     const document = form.elements.document.value.replace(/\D/g,'');
     if (![11,14].includes(document.length)) { dialog.querySelector('#customer-error').textContent = 'Informe CPF com 11 ou CNPJ com 14 dígitos.'; return; }
     button.disabled = true;
-    try { await api('/customers',{method:'POST',body:{name:form.elements.name.value.trim().toLocaleUpperCase('pt-BR'),document}}); dialog.close(); await load(); notice('Tomador cadastrado.'); }
+    try { const customer = await api('/customers',{method:'POST',body:{name:form.elements.name.value.trim().toLocaleUpperCase('pt-BR'),document}}); dialog.close(); if (typeof onCreated === 'function') onCreated(customer); else await load(); notice('Tomador cadastrado.'); }
     catch(error) { const node=dialog.querySelector('#customer-error'); if(node) node.textContent=error.message; }
     finally { button.disabled = false; }
   };

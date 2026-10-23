@@ -19,3 +19,5 @@
 
 .invoice-report table th:first-child{width:56%}.invoice-report th:nth-child(2),.invoice-report td:nth-child(2){width:44%;text-align:right;white-space:nowrap}
 .invoice-report tr:last-child th,.invoice-report tr:last-child td{border-bottom:0}
+
+.customer-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px}.customer-heading h2{margin:0}
