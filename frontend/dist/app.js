@@ -1,3 +1,4 @@
+import {invoiceDateQuery} from './invoice-date-filter.js';
 import {totalsReport, printTotalsReport} from './print-totals.js';
 const app = document.querySelector('#app');
 const dialog = document.querySelector('#dialog');
@@ -11,8 +12,8 @@ let data = { invoices: [], drafts: [], customers: [], settings: {} };
 let generation = 0;
 let toastTimer, invoiceSearchTimer;
 let sending = false;
-let invoiceFilters = {from:'',to:'',competenceFrom:'',competenceTo:'',search:'',status:''};
-const invoicePath = () => '/invoices?' + new URLSearchParams({date_from:invoiceFilters.from,date_to:invoiceFilters.to,competence_from:invoiceFilters.competenceFrom,competence_to:invoiceFilters.competenceTo,status:invoiceFilters.status,environment,search:invoiceFilters.search,include_totals:1});
+let invoiceFilters = {from:'',to:'',dateType:'emission',search:'',status:''};
+const invoicePath = () => '/invoices?' + new URLSearchParams({...invoiceDateQuery(invoiceFilters),status:invoiceFilters.status,environment,search:invoiceFilters.search,include_totals:1});
 const labels = { overview: 'Visão geral', new: 'Nova NFS-e', invoices: 'Notas fiscais', drafts: 'Rascunhos', customers: 'Tomadores', settings: 'Configurações' };
 const paths = {
   overview:'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',
@@ -76,7 +77,7 @@ function clearSession() {
   company = null;
   environment='homologacao'; emissionConfig={production_available:false};
   data = {invoices:[],drafts:[],customers:[],settings:{}};
-  invoiceFilters = {from:'',to:'',competenceFrom:'',competenceTo:'',search:'',status:''};
+  invoiceFilters = {from:'',to:'',dateType:'emission',search:'',status:''};
   generation++;
   if (dialog.open) dialog.close();
 }
@@ -132,7 +133,7 @@ async function load() {
     const config=await api('/emission-config');
     if (!company || current !== generation) return;
     const active=config.active_environment||'homologacao';
-    if(environment!==active){environment=active;invoiceFilters={from:'',to:'',competenceFrom:'',competenceTo:'',search:'',status:''};renderShell();}
+    if(environment!==active){environment=active;invoiceFilters={from:'',to:'',dateType:'emission',search:'',status:''};renderShell();}
     const [settings, customers, drafts, invoices] = await Promise.all(['/settings','/customers','/drafts?environment='+environment,invoicePath()].map(path => api(path)));
     if (!company || current !== generation) return;
     emissionConfig=config;
@@ -180,7 +181,7 @@ async function previewInvoiceTotals(format) {
   const buttons = document.querySelectorAll('[data-print-totals]');
   buttons.forEach(button=>button.disabled=true);
   try {
-    const result = await api('/invoices?' + new URLSearchParams({date_from:filters.from,date_to:filters.to,competence_from:filters.competenceFrom,competence_to:filters.competenceTo,status:filters.status,environment:environmentSnapshot,search:filters.search,include_totals:1}));
+    const result = await api('/invoices?' + new URLSearchParams({...invoiceDateQuery(filters),status:filters.status,environment:environmentSnapshot,search:filters.search,include_totals:1}));
     if (!company || company.id!==companySnapshot?.id) return;
     if (!result.summary) throw new Error('Não foi possível obter os totais para impressão. Atualize a consulta.');
     const html = totalsReport({company:companySnapshot,environment:environmentSnapshot,filters,summary:result.summary,generatedAt:new Date().toISOString()}, {esc,money,date,envLabel,paymentMethods});
@@ -211,7 +212,7 @@ function renderPage() {
     content.innerHTML = title('Sua empresa, em dia.', 'Acompanhe suas notas e continue de onde parou.', newButton()) +
       `<div class="banner">${icon('shield')} ${envHint(environment)} ${environment==='producao'&&!emissionConfig.production_available?'A emissão está bloqueada. Consulte o administrador.':''}</div><div class="stats"><article class="stat"><span class="eyebrow">Notas disponíveis</span><span class="stat-icon">${icon('invoices')}</span><strong>${data.invoices.length}</strong><span class="subtle">Notas na consulta atual</span></article><article class="stat"><span class="eyebrow">Valor das notas</span><span class="stat-icon">${icon('check')}</span><strong>${money(data.invoices.reduce((sum,n) => sum + Number(n.amount_cents),0))}</strong><span class="subtle">${envLabel(environment)}</span></article><article class="stat"><span class="eyebrow">Rascunhos pendentes</span><span class="stat-icon">${icon('drafts')}</span><strong>${pending}</strong><span class="subtle">Prontos para revisar</span></article></div><section class="panel"><div class="panel-header"><div><h2>Últimas notas</h2><p>Documentos e informações em um só lugar.</p></div><button class="text-button" data-go="invoices">Ver todas ${icon('arrow')}</button></div>${invoiceTable(data.invoices.slice(0,5))}</section><p class="footer-note">Os indicadores consideram os últimos 100 registros retornados pelo sistema.</p>`;
   } else if (page === 'invoices') {
-    content.innerHTML = title('Notas fiscais','Consulte por emissão e competência e baixe os documentos.', '<button class="secondary" id="refresh">Atualizar lista</button>') + invoiceTotals(data.invoiceSummary) + `<section class="panel"><div class="panel-header"><div><h2>Suas NFS-e</h2><p>${data.invoiceSummary?.count??data.invoices.length} notas no período consultado · ${envLabel(environment)}</p></div></div><form class="table-tools invoice-filters" id="invoice-filters"><label class="field">Emissão de<input type="date" name="from" value="${esc(invoiceFilters.from)}"></label><label class="field">Emissão até<input type="date" name="to" value="${esc(invoiceFilters.to)}"></label><label class="field">Competência de<input type="date" name="competenceFrom" value="${esc(invoiceFilters.competenceFrom)}"></label><label class="field">Competência até<input type="date" name="competenceTo" value="${esc(invoiceFilters.competenceTo)}"></label><label class="field">Situação<select name="status">${[['','Todas'],['authorized','Autorizadas'],['cancelled','Canceladas'],['imported','Importadas']].map(([value,label])=>`<option value="${value}" ${invoiceFilters.status===value?'selected':''}>${label}</option>`).join('')}</select></label><button class="primary" type="submit">Filtrar</button><button class="secondary" type="button" id="clear-filters">Limpar</button></form><div class="table-tools"><input class="search" id="invoice-search" type="search" maxlength="200" value="${esc(invoiceFilters.search)}" placeholder="Buscar por número, chave ou tomador" aria-label="Buscar nota"></div><div id="invoice-list"></div></section><p class="footer-note">A lista mostra até 100 notas; os totais consideram todas as notas dos filtros. Datas de emissão no horário de Brasília; datas finais incluídas. Os filtros de emissão e competência podem ser combinados.</p>`;
+    content.innerHTML = title('Notas fiscais','Consulte por emissão e competência e baixe os documentos.', '<button class="secondary" id="refresh">Atualizar lista</button>') + invoiceTotals(data.invoiceSummary) + `<section class="panel"><div class="panel-header"><div><h2>Suas NFS-e</h2><p>${data.invoiceSummary?.count??data.invoices.length} notas no período consultado · ${envLabel(environment)}</p></div></div><form class="table-tools invoice-filters" id="invoice-filters"><label class="field">Filtrar por<select name="dateType"><option value="emission" ${invoiceFilters.dateType==='emission'?'selected':''}>Data de emissão</option><option value="competence" ${invoiceFilters.dateType==='competence'?'selected':''}>Data de competência</option></select></label><label class="field">Data inicial<input type="date" name="from" value="${esc(invoiceFilters.from)}"></label><label class="field">Data final<input type="date" name="to" value="${esc(invoiceFilters.to)}"></label><label class="field">Situação<select name="status">${[['','Todas'],['authorized','Autorizadas'],['cancelled','Canceladas'],['imported','Importadas']].map(([value,label])=>`<option value="${value}" ${invoiceFilters.status===value?'selected':''}>${label}</option>`).join('')}</select></label><button class="primary" type="submit">Filtrar</button><button class="secondary" type="button" id="clear-filters">Limpar</button></form><div class="table-tools"><input class="search" id="invoice-search" type="search" maxlength="200" value="${esc(invoiceFilters.search)}" placeholder="Buscar por número, chave ou tomador" aria-label="Buscar nota"></div><div id="invoice-list"></div></section><p class="footer-note">A lista mostra até 100 notas; os totais consideram todas as notas dos filtros. Datas de emissão no horário de Brasília; datas finais incluídas. O período considera a data escolhida em “Filtrar por”.</p>`;
     document.querySelectorAll('[data-print-totals]').forEach(button=>button.onclick=()=>previewInvoiceTotals(button.dataset.printTotals));
     document.querySelector('#refresh').onclick = load;
     document.querySelector('#invoice-filters').onsubmit = async event => {
@@ -219,13 +220,11 @@ function renderPage() {
       const form = event.currentTarget;
       const from = form.elements.from.value, to = form.elements.to.value;
       if (from && to && from > to) { notice('A data inicial deve ser anterior ou igual à final.'); return; }
-      const competenceFrom = form.elements.competenceFrom.value, competenceTo = form.elements.competenceTo.value;
-      if (competenceFrom && competenceTo && competenceFrom > competenceTo) { notice('A competência inicial deve ser anterior ou igual à final.'); return; }
-      invoiceFilters.competenceFrom = competenceFrom; invoiceFilters.competenceTo = competenceTo;
+      invoiceFilters.dateType = form.elements.dateType.value;
       invoiceFilters.from = from; invoiceFilters.to = to; invoiceFilters.status=event.currentTarget.elements.status.value;
       await load();
     };
-    document.querySelector('#clear-filters').onclick = () => { invoiceFilters = {from:'',to:'',competenceFrom:'',competenceTo:'',search:'',status:''}; load(); };
+    document.querySelector('#clear-filters').onclick = () => { invoiceFilters = {from:'',to:'',dateType:'emission',search:'',status:''}; load(); };
     document.querySelector('#invoice-list').innerHTML = invoiceTable(data.invoices);
     bindDocuments();
     document.querySelector('#invoice-search').oninput = event => {
