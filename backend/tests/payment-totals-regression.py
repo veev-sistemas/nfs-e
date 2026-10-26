@@ -33,7 +33,7 @@ status,legacy=request('/v1/drafts','POST',{'amount_cents':100},token)
 assert status==201 and legacy['payment_method'] is None
 
 for n,draft in enumerate(drafts+[legacy]):
-    xml='<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse"><infNFSe><dhProc>2026-10-21T12:00:00Z</dhProc><DPS><infDPS><toma><xNome>CLIENTE PAGAMENTO</xNome></toma></infDPS></DPS></infNFSe></NFSe>'
+    xml='<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse"><infNFSe><dhProc>2026-10-21T12:00:00Z</dhProc><DPS><infDPS><dCompet>2026-09-30</dCompet><toma><xNome>CLIENTE PAGAMENTO</xNome></toma></infDPS></DPS></infNFSe></NFSe>'
     sql("insert into invoices(company_id,draft_id,environment,access_key,invoice_number,issuer_document,amount_cents,xml_content,xml_sha256) values('%s','%s','homologacao','%s','%s','%s',%s,'%s','fixture')"%(company,draft['id'],str(7000+n).zfill(50),7000+n,document,draft['amount_cents'],xml))
 # More than 100 records, including one cancelled and one production invoice.
 sql("""insert into invoices(company_id,environment,access_key,invoice_number,issuer_document,amount_cents,xml_content,xml_sha256)
@@ -66,3 +66,14 @@ assert request(path)[0]==401
 other=request('/v1/auth/login','POST',{'cnpj':'99999999999999','password':'Regression-password-2026'})[1]['access_token']
 assert request(path+'&search=CLIENTE%20PAGAMENTO',token=other)[1]['summary']['count']==0
 print('OK: pagamentos persistidos, rejeição de métodos inválidos, legado sem informação, totais além de 100, canceladas separadas, filtros/busca e isolamento por empresa/ambiente.')
+
+# Competence comes from XML, independently of emission (including imported notes).
+cp=path+'&competence_from=2026-09-30&competence_to=2026-09-30'
+r=request(cp,token=token)[1]
+assert r['summary']['count']==6,r
+assert all(i['competence']=='2026-09-30' for i in r['invoices'])
+assert request(cp+'&search=7001',token=token)[1]['summary']['count']==1
+assert request(path+'&competence_from=2026-10-01',token=token)[1]['summary']['count']==0
+for query in ['competence_from=bad','competence_to=2026-02-30','competence_from=2026-10-02&competence_to=2026-10-01']:
+    assert request(path+'&'+query,token=token)[0]==422,query
+print('OK: filtros independentes de emissão e competência, limites inclusivos e validação.')

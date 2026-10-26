@@ -11,3 +11,5 @@ Com `include_totals=1`, retorna `{invoices, summary}`. A lista contém até 100 
 `summary.count` inclui as canceladas presentes no filtro. `total_cents` e `by_payment` excluem canceladas; `cancelled_count` e `cancelled_cents` informam esse grupo separadamente. Os valores agregados são devolvidos como texto em centavos. Métodos não informados ficam no grupo `nao_informado`.
 
 Validação: `tests/payment-totals-regression.py`, integrado ao harness local `tests/access-http-regression.sh`, cobre métodos válidos/inválidos, persistência, compatibilidade, mais de 100 notas, canceladas, filtros/busca e isolamento entre empresas/ambientes. Nenhuma transmissão fiscal é realizada no harness.
+
+Filtros adicionais: `competence_from` e `competence_to` (AAAA-MM-DD), inclusivos e combináveis com `date_from`/`date_to` de emissão. Competência extraída do XML (`DPS/infDPS/dCompet`); sem competência não atende a um intervalo de competência. Aplicados antes da lista e dos totais, sem migração. Requer recompilar/atualizar a API antes do frontend.

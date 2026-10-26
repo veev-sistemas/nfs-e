@@ -195,7 +195,7 @@ var
   Amount: Int64;
   Guid: TGUID;
   InvoiceId, DraftId, InvoiceXml: string;
-  IssuedAt, Competence, DateFrom, DateTo, Environment, StatusFilter, PaymentMethod, SearchFilter, InvoiceSQL: string;
+  IssuedAt, Competence, CompetenceFrom, CompetenceTo, DateFrom, DateTo, Environment, StatusFilter, PaymentMethod, SearchFilter, InvoiceSQL: string;
   ParsedDate: TDateTime;
   PdfBytes: TBytes;
 
@@ -496,22 +496,34 @@ begin
           raise EApiError.Create(422,'Data final invalida. Use AAAA-MM-DD.');
         if (DateFrom<>'') and (DateTo<>'') and (DateFrom>DateTo) then
           raise EApiError.Create(422,'A data inicial deve ser anterior ou igual a data final.');
+        CompetenceFrom:=Request.QueryFields.Values['competence_from'];
+        CompetenceTo:=Request.QueryFields.Values['competence_to'];
+        if (CompetenceFrom<>'') and (not TRegEx.IsMatch(CompetenceFrom,'^[0-9]{4}-[0-9]{2}-[0-9]{2}$') or
+           not TryISO8601ToDate(CompetenceFrom+'T00:00:00Z',ParsedDate,True)) then
+          raise EApiError.Create(422,'Competencia inicial invalida. Use AAAA-MM-DD.');
+        if (CompetenceTo<>'') and (not TRegEx.IsMatch(CompetenceTo,'^[0-9]{4}-[0-9]{2}-[0-9]{2}$') or
+           not TryISO8601ToDate(CompetenceTo+'T00:00:00Z',ParsedDate,True)) then
+          raise EApiError.Create(422,'Competencia final invalida. Use AAAA-MM-DD.');
+        if (CompetenceFrom<>'') and (CompetenceTo<>'') and (CompetenceFrom>CompetenceTo) then
+          raise EApiError.Create(422,'Competencia inicial deve ser anterior ou igual a final.');
         SearchFilter:=Trim(Request.QueryFields.Values['search']);
         if Length(SearchFilter)>200 then raise EApiError.Create(422,'Busca deve ter ate 200 caracteres.');
         InvoiceSQL:='with base as (' +
           'select i.id, i.draft_id, i.environment, i.access_key, i.invoice_number, i.issuer_document, ' +
-          'i.amount_cents, i.status, i.source, i.imported_at, i.issued_at, d.payment_method, '+
+          'i.amount_cents, i.status, i.source, i.imported_at, i.issued_at, x.competence, d.payment_method, '+
           '(select a.status from cancellation_attempts a where a.invoice_id=i.id and a.company_id=i.company_id order by a.created_at desc,a.id desc limit 1) as cancellation_status, '+
           'coalesce(nullif(x.customer_name,''''),c.name) as customer_name '+
           'from invoices i left join drafts d on d.id=i.draft_id and d.company_id=i.company_id '+
           'left join customers c on c.id=d.customer_id and c.company_id=i.company_id ' +
           'left join XMLTABLE(XMLNAMESPACES(''http://www.sped.fazenda.gov.br/nfse'' AS n),''/n:NFSe/n:infNFSe'' '+
-          'PASSING xmlparse(document i.xml_content) COLUMNS customer_name text PATH ''n:DPS/n:infDPS/n:toma/n:xNome'') x on true '+
+          'PASSING xmlparse(document i.xml_content) COLUMNS competence date PATH ''n:DPS/n:infDPS/n:dCompet'', customer_name text PATH ''n:DPS/n:infDPS/n:toma/n:xNome'') x on true '+
           'where i.company_id=cast(:company as uuid) '+
           'and (:status='''' or i.status=:status or (:status=''authorized'' and i.status in (''authorized_homologation'',''authorized_production''))) '+
           'and (:environment='''' or i.environment=:environment) '+
           'and (:date_from='''' or issued_at >= (cast(nullif(:date_from,'''') as date)::timestamp at time zone ''America/Sao_Paulo'')) '+
           'and (:date_to='''' or issued_at < ((cast(nullif(:date_to,'''') as date)+1)::timestamp at time zone ''America/Sao_Paulo'')) '+
+          'and (:competence_from='''' or x.competence >= cast(nullif(:competence_from,'''') as date)) '+
+          'and (:competence_to='''' or x.competence <= cast(nullif(:competence_to,'''') as date)) '+
           ') ';
 
         InvoiceSQL:=InvoiceSQL+
@@ -532,6 +544,8 @@ begin
         Run(InvoiceSQL);
         Q.ParamByName('search').AsWideString:=SearchFilter;
         Q.ParamByName('status').AsWideString:=StatusFilter;
+        Q.ParamByName('competence_from').AsWideString:=CompetenceFrom;
+        Q.ParamByName('competence_to').AsWideString:=CompetenceTo;
         Q.ParamByName('date_from').AsWideString:=DateFrom;
         Q.ParamByName('date_to').AsWideString:=DateTo;
         Q.ParamByName('environment').AsWideString:=Environment;
