@@ -1,4 +1,4 @@
-import {invoiceDateQuery} from './invoice-date-filter.js';
+import {invoiceDateQuery, competenceDate, validateCompetenceResult} from './invoice-date-filter.js';
 import {totalsReport, printTotalsReport} from './print-totals.js';
 const app = document.querySelector('#app');
 const dialog = document.querySelector('#dialog');
@@ -136,6 +136,7 @@ async function load() {
     if(environment!==active){environment=active;invoiceFilters={from:'',to:'',dateType:'emission',search:'',status:''};renderShell();}
     const [settings, customers, drafts, invoices] = await Promise.all(['/settings','/customers','/drafts?environment='+environment,invoicePath()].map(path => api(path)));
     if (!company || current !== generation) return;
+    validateCompetenceResult(invoices, invoiceFilters);
     emissionConfig=config;
     data = {settings,customers,drafts:drafts.filter(d=>(d.environment||'homologacao')===environment),invoices:Array.isArray(invoices)?invoices:invoices.invoices,invoiceSummary:invoices.summary||null};
     renderPage();
@@ -183,6 +184,7 @@ async function previewInvoiceTotals(format) {
   try {
     const result = await api('/invoices?' + new URLSearchParams({...invoiceDateQuery(filters),status:filters.status,environment:environmentSnapshot,search:filters.search,include_totals:1}));
     if (!company || company.id!==companySnapshot?.id) return;
+    validateCompetenceResult(result, filters);
     if (!result.summary) throw new Error('Não foi possível obter os totais para impressão. Atualize a consulta.');
     const html = totalsReport({company:companySnapshot,environment:environmentSnapshot,filters,summary:result.summary,generatedAt:new Date().toISOString()}, {esc,money,date,envLabel,paymentMethods});
     const receipt = format==='80mm';
@@ -201,7 +203,7 @@ async function previewInvoiceTotals(format) {
 
 function invoiceTable(invoices) {
   if (!invoices.length) return empty('Nenhuma nota por aqui', 'As notas autorizadas aparecerão nesta lista.');
-  return `<div class="table-wrap"><table><thead><tr><th>Nota / emissão</th><th>Tomador</th><th>Ambiente</th><th>Valor</th><th>Pagamento</th><th>Situação</th><th>Documentos</th></tr></thead><tbody>${invoices.map(note => `<tr><td><strong>NFS-e ${esc(note.invoice_number)}</strong><div class="minor">${esc(date(note.issued_at || note.imported_at))}</div></td><td>${esc((note.customer_name||'Tomador não informado').toLocaleUpperCase('pt-BR'))}</td><td>${envLabel(note.environment)}</td><td><strong>${money(note.amount_cents)}</strong></td><td>${esc(paymentLabel(note.payment_method))}</td><td>${badge(note.status)}</td><td><div class="actions">${note.status!=='cancelled'?`<button class="text-button" data-download="${esc(note.id)}" data-format="pdf">${icon('download')} DANFSe</button>`:''}<button class="text-button" data-download="${esc(note.id)}" data-format="xml">XML</button><button class="text-button" data-note="${esc(note.id)}">Detalhes</button>${['authorized_production','authorized_homologation'].includes(note.status)&&note.source==='sefin_api'&&!['sending','unknown'].includes(note.cancellation_status)?`<button class="text-button" data-cancel="${esc(note.id)}">Cancelar NFS-e</button>`:''}${note.status==='cancelled'||['sending','unknown'].includes(note.cancellation_status)?`<button class="text-button" data-cancel-result="${esc(note.id)}">Consultar cancelamento</button>`:''}</div></td></tr>`).join('')}</tbody></table></div>`;
+  return `<div class="table-wrap"><table><thead><tr><th>Nota / emissão</th><th>Competência</th><th>Tomador</th><th>Ambiente</th><th>Valor</th><th>Pagamento</th><th>Situação</th><th>Documentos</th></tr></thead><tbody>${invoices.map(note => `<tr><td><strong>NFS-e ${esc(note.invoice_number)}</strong><div class="minor">${esc(date(note.issued_at || note.imported_at))}</div></td><td>${esc(competenceDate(note.competence))}</td><td>${esc((note.customer_name||'Tomador não informado').toLocaleUpperCase('pt-BR'))}</td><td>${envLabel(note.environment)}</td><td><strong>${money(note.amount_cents)}</strong></td><td>${esc(paymentLabel(note.payment_method))}</td><td>${badge(note.status)}</td><td><div class="actions">${note.status!=='cancelled'?`<button class="text-button" data-download="${esc(note.id)}" data-format="pdf">${icon('download')} DANFSe</button>`:''}<button class="text-button" data-download="${esc(note.id)}" data-format="xml">XML</button><button class="text-button" data-note="${esc(note.id)}">Detalhes</button>${['authorized_production','authorized_homologation'].includes(note.status)&&note.source==='sefin_api'&&!['sending','unknown'].includes(note.cancellation_status)?`<button class="text-button" data-cancel="${esc(note.id)}">Cancelar NFS-e</button>`:''}${note.status==='cancelled'||['sending','unknown'].includes(note.cancellation_status)?`<button class="text-button" data-cancel-result="${esc(note.id)}">Consultar cancelamento</button>`:''}</div></td></tr>`).join('')}</tbody></table></div>`;
 }
 
 function renderPage() {
