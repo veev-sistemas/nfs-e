@@ -50,6 +50,24 @@ begin
   for C in Value do if not CharInSet(C,['0'..'9']) then raise EEmissionError.Create('Codigo fiscal deve ser numerico.');
 end;
 
+function FiscalStateCode(const Municipality, State: string): Integer;
+const
+  States: array[0..26] of string = ('RO','AC','AM','RR','PA','AP','TO','MA','PI','CE','RN','PB','PE','AL','SE','BA','MG','ES','RJ','SP','PR','SC','RS','MS','MT','GO','DF');
+  Codes: array[0..26] of Integer = (11,12,13,14,15,16,17,21,22,23,24,25,26,27,28,29,31,32,33,35,41,42,43,50,51,52,53);
+var I: Integer;
+begin
+  CheckDigits(Municipality,7);
+  for I:=Low(States) to High(States) do
+    if State=States[I] then
+    begin
+      Result:=Codes[I];
+      if StrToInt(Copy(Municipality,1,2))<>Result then
+        raise EEmissionError.Create('Codigo do municipio nao corresponde a UF do cadastro fiscal.');
+      Exit;
+    end;
+  raise EEmissionError.Create('UF invalida no cadastro fiscal.');
+end;
+
 function EmissionConfig(Conn: TFDConnection; const Company: string): string;
 var Q: TFDQuery; Fonts: string; Ready: Boolean;
 begin
@@ -201,8 +219,7 @@ begin
         Profile := Obj(Payload,'profile');
         Settings := Obj(Payload,'settings');
         CompanyData := Obj(Payload,'company');
-        if (S(Profile,'municipality_code')<>'3136702') or (S(Profile,'state_code')<>'MG') then
-          raise EEmissionError.Create('Perfil inicial limitado a Juiz de Fora/MG.');
+        FiscalStateCode(S(Profile,'municipality_code'),S(Profile,'state_code'));
         if S(Settings,'tax_regime') <> 'simples_nacional' then raise EEmissionError.Create('Fluxo atual preparado somente para ME/EPP do Simples Nacional.');
         CheckDigits(S(CompanyData,'document'),14);
         CheckDigits(S(Settings,'service_code'),6);
@@ -275,7 +292,7 @@ begin
           if (Profile.GetValue('municipal_registration') is TJSONString) then
             Prestador.IdentificacaoPrestador.InscricaoMunicipal := Profile.GetValue('municipal_registration').Value;
           Prestador.RazaoSocial := S(CompanyData,'name');
-          Prestador.cUF := 31;
+          Prestador.cUF := FiscalStateCode(S(Profile,'municipality_code'),S(Profile,'state_code'));
           Prestador.Endereco.Endereco := S(Profile,'street');
           Prestador.Endereco.Numero := S(Profile,'house_number');
           Prestador.Endereco.Bairro := S(Profile,'district');

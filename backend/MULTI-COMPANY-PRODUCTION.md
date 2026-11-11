@@ -6,3 +6,5 @@ NFSE_ENABLE_PRODUCTION=1 continua sendo a chave geral. Cada empresa precisa da l
 pilot_allowed permanece true na resposta apenas para compatibilidade com interfaces antigas; não controla acesso. O administrador mostra Servidor de produção.
 
 Publicar primeiro o pacote atualizado no nfse-api e depois implantar nfse-web pelo GitHub. Sem migração de banco. Não altera liberação, série ou sequência de nenhuma empresa automaticamente.
+
+Município e UF da DPS vêm do perfil fiscal da empresa, inclusive cUF do prestador. Removida a restrição inicial a Juiz de Fora/MG. O prefixo IBGE deve corresponder à UF; esta validação não confirma adesão do município ao ambiente nacional. Teste Pascal local com MG, RJ, SP e entradas divergentes, sem envio fiscal.
