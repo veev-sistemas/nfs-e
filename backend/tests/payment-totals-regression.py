@@ -20,6 +20,12 @@ company=sql("insert into companies(name,document) values('PAYMENT QA','%s') retu
 sql("select set_company_password('%s','Payments-regression-2026')"%company)
 sql("insert into fiscal_defaults(company_id,settings) values('%s','{\"service_code\":\"090103\",\"service_description\":\"TESTE\",\"tax_regime\":\"simples_nacional\"}')"%company)
 token=request('/v1/auth/login','POST',{'cnpj':document,'password':'Payments-regression-2026'})[1]['access_token']
+assert request('/v1/settings','PATCH',{'municipal_service_code':''},token)[0]==200
+assert request('/v1/settings',token=token)[1]['municipal_service_code']==''
+for invalid in ['00','abc',2,None]:
+    assert request('/v1/settings','PATCH',{'municipal_service_code':invalid},token)[0]==422
+assert request('/v1/settings','PATCH',{'municipal_service_code':'002'},token)[0]==200
+assert request('/v1/settings','PATCH',{'municipal_service_code':''},token)[0]==200
 methods=['dinheiro','pix','boleto','cartao_credito','cartao_debito']
 drafts=[]
 for method in methods:

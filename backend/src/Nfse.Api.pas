@@ -100,10 +100,16 @@ begin
       if not TRegEx.IsMatch(RequiredString(Obj, 'cst_ibs_cbs'), '^[0-9]{3}$') then
         raise EApiError.Create(422, 'cst_ibs_cbs deve conter tres digitos em texto.');
     end
+    else if Pair.JsonString.Value = 'municipal_service_code' then
+    begin
+      if not (Pair.JsonValue is TJSONString) then
+        raise EApiError.Create(422,'municipal_service_code deve ser texto.');
+      if (TJSONString(Pair.JsonValue).Value<>'') and not TRegEx.IsMatch(TJSONString(Pair.JsonValue).Value,'^[0-9]{3}$') then
+        raise EApiError.Create(422,'Codigo municipal deve estar vazio ou conter tres digitos.');
+    end
     else if (Pair.JsonString.Value = 'service_code') or
             (Pair.JsonString.Value = 'service_description') or
             (Pair.JsonString.Value = 'tax_regime') or
-            (Pair.JsonString.Value = 'municipal_service_code') or
             (Pair.JsonString.Value = 'nbs_code') then
       RequiredString(Obj, Pair.JsonString.Value)
     else
