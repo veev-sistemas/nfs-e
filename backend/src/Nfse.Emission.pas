@@ -36,6 +36,22 @@ begin
   if Result = '' then raise EEmissionError.Create('Configuracao fiscal vazia: ' + Key);
 end;
 
+function MunicipalServiceCode(Settings: TJSONObject): string;
+var V: TJSONValue;
+begin
+  V:=Settings.GetValue('municipal_service_code');
+  if (V=nil) or (V is TJSONNull) then Exit('');
+  if not (V is TJSONString) then
+    raise EEmissionError.Create('Codigo municipal deve ser texto.');
+  Result:=Trim(V.Value);
+  if Result<>'' then
+  begin
+    if Length(Result)<>3 then raise EEmissionError.Create('Codigo municipal deve conter tres digitos.');
+    if not CharInSet(Result[1],['0'..'9']) or not CharInSet(Result[2],['0'..'9']) or not CharInSet(Result[3],['0'..'9']) then
+      raise EEmissionError.Create('Codigo municipal deve conter somente digitos.');
+  end;
+end;
+
 function Obj(Parent: TJSONObject; const Key: string): TJSONObject;
 begin
   if not (Parent.GetValue(Key) is TJSONObject) then
@@ -223,7 +239,7 @@ begin
         if S(Settings,'tax_regime') <> 'simples_nacional' then raise EEmissionError.Create('Fluxo atual preparado somente para ME/EPP do Simples Nacional.');
         CheckDigits(S(CompanyData,'document'),14);
         CheckDigits(S(Settings,'service_code'),6);
-        if S(Settings,'municipal_service_code')<>'' then CheckDigits(S(Settings,'municipal_service_code'),3);
+        MunicipalServiceCode(Settings);
         CheckDigits(S(Settings,'nbs_code'),9);
         NFSe := TACBrNFSeX.Create(nil);
         NFSe.Configuracoes.Geral.SSLCryptLib := cryOpenSSL;
@@ -308,7 +324,7 @@ begin
             Tomador.RazaoSocial := S(Customer,'name');
           end;
           Servico.ItemListaServico := S(Settings,'service_code');
-          Servico.CodigoTributacaoMunicipio := S(Settings,'municipal_service_code');
+          Servico.CodigoTributacaoMunicipio := MunicipalServiceCode(Settings);
           Servico.CodigoNBS := S(Settings,'nbs_code');
           Servico.CodigoMunicipio := cLocEmi;
           Servico.CodigoPais := 1058;
