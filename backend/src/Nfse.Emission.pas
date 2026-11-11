@@ -60,14 +60,13 @@ begin
   try
     Q.Connection:=Conn;
     Q.SQL.Text:='select jsonb_build_object(''production_enabled'',coalesce(e.production_enabled,false),'+
-      '''active_environment'',coalesce(e.active_environment,''homologacao''),''production_series'',e.production_series,''server_enabled'',cast(:server as boolean),''pilot_allowed'',c.document=:pilot,'+
+      '''active_environment'',coalesce(e.active_environment,''homologacao''),''production_series'',e.production_series,''server_enabled'',cast(:server as boolean),''pilot_allowed'',true,'+
       '''fonts_ready'',cast(:fonts as boolean),''production_available'',coalesce(e.production_enabled,false) '+
-      'and cast(:server as boolean) and c.document=:pilot and cast(:fonts as boolean) and exists(select 1 from dps_sequences s '+
+      'and cast(:server as boolean) and cast(:fonts as boolean) and exists(select 1 from dps_sequences s '+
       'where s.company_id=c.id and s.environment=''producao'' and s.series=e.production_series))::text '+
       'from companies c left join company_emission_config e on e.company_id=c.id where c.id=cast(:company as uuid)';
     Q.ParamByName('company').AsWideString:=Company;
     Q.ParamByName('server').AsBoolean:=GetEnvironmentVariable('NFSE_ENABLE_PRODUCTION')='1';
-    Q.ParamByName('pilot').AsWideString:=GetEnvironmentVariable('NFSE_PRODUCTION_ALLOWED_CNPJ');
     Q.ParamByName('fonts').AsBoolean:=Ready;
     Q.Open;
     if Q.IsEmpty then raise EEmissionError.Create('Empresa nao encontrada.');
@@ -120,7 +119,7 @@ begin
     CertificateResult:=TJSONObject.ParseJSONValue(ConfigJson) as TJSONObject;
     try
       if not (CertificateResult.GetValue('production_available') is TJSONTrue) then
-        raise EEmissionError.Create('Producao indisponivel. Confira liberacao da empresa, piloto no servidor, serie e fontes do DANFSe.');
+        raise EEmissionError.Create('Producao indisponivel. Confira liberacao da empresa, servidor, serie e fontes do DANFSe.');
     finally CertificateResult.Free; end;
     BaseURL:='https://sefin.nfse.gov.br/SefinNacional'; InvoiceStatus:='authorized_production';
   end

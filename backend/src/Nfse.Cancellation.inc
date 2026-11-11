@@ -100,8 +100,8 @@ begin
     SQL('select (to_jsonb(a)-''event_xml'')::text from cancellation_attempts a where company_id=cast(:company as uuid) '+
       'and invoice_id=cast(:invoice as uuid) and status in (''sending'',''unknown'',''cancelled'') limit 1'); Q.Open;
     if not Q.IsEmpty then begin Result:=Q.Fields[0].AsString; Exit; end;
-    SQL('select i.environment,i.issuer_document,i.access_key,f.municipality_code from invoices i '+
-      'join fiscal_profiles f on f.company_id=i.company_id where i.company_id=cast(:company as uuid) '+
+    SQL('select i.environment,i.issuer_document,i.access_key,f.municipality_code,coalesce(e.production_enabled,false) from invoices i '+
+      'join fiscal_profiles f on f.company_id=i.company_id left join company_emission_config e on e.company_id=i.company_id where i.company_id=cast(:company as uuid) '+
       'and i.id=cast(:invoice as uuid) and i.source=''sefin_api'' and i.status in (''authorized_homologation'',''authorized_production'')'); Q.Open;
     if Q.IsEmpty then raise EEmissionError.Create('Nota autorizada pela SEFIN nao encontrada.');
     Environment:=Q.Fields[0].AsString; Document:=Q.Fields[1].AsString; Key:=Q.Fields[2].AsString;
@@ -110,7 +110,7 @@ begin
     begin
       // Cancellation does not require the active emission series or PDF fonts.
       if (GetEnvironmentVariable('NFSE_ENABLE_PRODUCTION')<>'1') or
-        (GetEnvironmentVariable('NFSE_PRODUCTION_ALLOWED_CNPJ')<>Document) then
+        (not Q.Fields[4].AsBoolean) then
         raise EEmissionError.Create('Operacoes em producao nao habilitadas no servidor para este CNPJ.');
       BaseURL:='https://sefin.nfse.gov.br/SefinNacional';
       Schemas:=GetEnvironmentVariable('NFSE_PRODUCTION_SCHEMAS_DIR');
