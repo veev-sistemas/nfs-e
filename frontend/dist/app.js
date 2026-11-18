@@ -244,8 +244,9 @@ function renderPage() {
     content.innerHTML = title('Rascunhos','Revise os dados antes de emitir. Ambiente: '+envLabel(environment)+'.', newButton()) + `<section class="panel"><div class="panel-header"><div><h2>Seus rascunhos</h2><p>Até 100 registros mais recentes.</p></div></div>${data.drafts.length ? `<div class="table-wrap"><table><thead><tr><th>Serviço / criação</th><th>Tomador</th><th>Valor</th><th>Situação</th><th>Ação</th></tr></thead><tbody>${data.drafts.map(d => `<tr><td><strong>${esc((d.settings?.service_description || 'Serviço').slice(0,48))}</strong><div class="minor">${esc(date(d.created_at))}</div></td><td>${esc(customerName(d.customer_id))}</td><td>${money(d.amount_cents)}</td><td>${badge(draftStatus(d))}</td><td><button class="text-button" data-draft="${esc(d.id)}">${draftStatus(d) === 'draft' ? 'Revisar' : 'Ver resultado'} ${icon('arrow')}</button></td></tr>`).join('')}</tbody></table></div>` : empty('Seu próximo serviço começa aqui','Crie um rascunho com valor, serviço e tomador opcional.')}</section>`;
     document.querySelectorAll('[data-draft]').forEach(button => button.onclick = () => reviewDraft(data.drafts.find(d => d.id === button.dataset.draft)));
   } else if (page === 'customers') {
-    content.innerHTML = title('Tomadores','Mantenha os dados de quem recebe seus serviços.', '<button class="primary" id="new-customer">'+icon('new')+' Cadastrar tomador</button>') + `<section class="panel"><div class="panel-header"><div><h2>Tomadores cadastrados</h2><p>O tomador pode ser omitido na criação do rascunho.</p></div></div>${data.customers.length ? `<div class="table-wrap"><table><thead><tr><th>Nome / razão social</th><th>CPF ou CNPJ</th></tr></thead><tbody>${data.customers.map(c => `<tr><td><strong>${esc(c.name.toLocaleUpperCase('pt-BR'))}</strong></td><td>${esc(doc(c.document))}</td></tr>`).join('')}</tbody></table></div>` : empty('Nenhum tomador cadastrado','Cadastre pessoas e empresas para selecioná-las nas próximas notas.')}</section>`;
-    document.querySelector('#new-customer').onclick = customerForm;
+    content.innerHTML = title('Tomadores','Mantenha os dados de quem recebe seus serviços.', '<button class="primary" id="new-customer">'+icon('new')+' Cadastrar tomador</button>') + `<section class="panel"><div class="panel-header"><div><h2>Tomadores cadastrados</h2><p>O tomador pode ser omitido na criação do rascunho.</p></div></div>${data.customers.length ? `<div class="table-wrap"><table><thead><tr><th>Nome / razão social</th><th>CPF ou CNPJ</th><th>Ações</th></tr></thead><tbody>${data.customers.map(c => `<tr><td><strong>${esc(c.name.toLocaleUpperCase('pt-BR'))}</strong></td><td>${esc(doc(c.document))}</td><td><button class="text-button" data-edit-customer="${esc(c.id)}">Editar</button></td></tr>`).join('')}</tbody></table></div>` : empty('Nenhum tomador cadastrado','Cadastre pessoas e empresas para selecioná-las nas próximas notas.')}</section>`;
+    document.querySelector('#new-customer').onclick = () => customerForm();
+    document.querySelectorAll('[data-edit-customer]').forEach(button=>button.onclick=()=>customerForm(null,data.customers.find(c=>c.id===button.dataset.editCustomer)));
   } else if (page === 'settings') {
     content.innerHTML = title('Configurações','Dados da empresa e padrões para os próximos serviços.') + `<div class="split settings-layout"><section class="panel"><div class="panel-header"><div><h2>Padrões do serviço</h2><p>Alterações se aplicam somente aos novos rascunhos.</p></div></div><form id="settings-form" class="panel-body"><div class="form-grid">${settingsFields(data.settings)}</div><p class="error" role="alert" id="settings-error"></p><button type="submit" class="primary">Salvar configurações</button></form></section><section class="panel profile-card"><h3>Empresa conectada</h3><p class="subtle">${esc(company.name)}<br>${esc(doc(company.document))}</p><div class="divider"></div><div class="env-pill">${esc(envLabel(environment).toLocaleUpperCase("pt-BR"))}</div><p class="subtle" style="margin-top:15px">O certificado e o cadastro fiscal são gerenciados pelo administrador.</p></section></div>`;
     document.querySelector('#settings-form').onsubmit = saveSettings;
@@ -324,9 +325,35 @@ async function saveSettings(event) {
   finally { button.disabled = false; }
 }
 
-function customerForm(onCreated) {
-  dialog.innerHTML = `<h2 id="dialog-title">Cadastrar tomador</h2><p class="subtle">Informe os dados da pessoa ou empresa.</p><form id="customer-form"><label class="field">Nome ou razão social<input name="name" class="uppercase" required maxlength="500" autocomplete="name"></label><label class="field">CPF ou CNPJ<input name="document" required inputmode="numeric" maxlength="18"></label><p class="error" id="customer-error" role="alert"></p><div class="actions"><button class="secondary" type="button" data-close>Cancelar</button><button class="primary" type="submit">Cadastrar tomador</button></div></form>`;
+function customerForm(onCreated, existing = null) {
+  dialog.innerHTML = `<h2 id="dialog-title">Cadastrar tomador</h2><p class="subtle">Informe os dados da pessoa ou empresa.</p><form id="customer-form"><label class="field">Nome ou razão social<input name="name" class="uppercase" required maxlength="500" autocomplete="name"></label><label class="field">CPF ou CNPJ<input name="document" required inputmode="numeric" maxlength="18"></label><div class="divider"></div><h3>Contato e endereço opcionais</h3><p class="subtle">Pode cadastrar sem preencher. Telefone e e-mail são independentes. Para enviar endereço na nota, complete CEP, código IBGE do município, UF, bairro, logradouro e número; complemento é opcional.</p><div class="form-grid">${[['phone','Telefone','tel',20],['email','E-mail','email',80],['postal_code','CEP','text',9],['municipality_name','Município','text',100],['municipality_code','Código IBGE do município','text',7],['state_code','UF','text',2],['district','Bairro','text',60],['street','Logradouro','text',255],['house_number','Número','text',60],['complement','Complemento','text',156]].map(([key,label,type,max])=>`<label class="field">${label}<input name="${key}" type="${type}" maxlength="${max}"></label>`).join('')}</div><p class="error" id="customer-error" role="alert"></p><div class="actions"><button class="secondary" type="button" data-close>Cancelar</button><button class="primary" type="submit">Cadastrar tomador</button></div></form>`;
+  dialog.classList.add('customer-dialog');
+  dialog.addEventListener('close',()=>dialog.classList.remove('customer-dialog'),{once:true});
+  if (existing) {
+    dialog.querySelector('#dialog-title').textContent='Editar tomador';
+    dialog.querySelector('[type=submit]').textContent='Salvar tomador';
+    for (const input of dialog.querySelectorAll('input[name]')) input.value=existing[input.name] || '';
+  }
   dialog.showModal();
+  const customerFormNode=dialog.querySelector('#customer-form');
+  const cepInput=customerFormNode.elements.postal_code;
+  const cepHint=document.createElement('span');cepHint.className='subtle';cepHint.setAttribute('role','status');cepInput.after(cepHint);
+  let cepLookup=0;
+  let lastCEP='';
+  cepInput.oninput=async()=>{
+    const cep=cepInput.value.replace(/\D/g,'');
+    if(cep.length!==8){++cepLookup;lastCEP='';cepHint.textContent='';return;}
+    if(cep===lastCEP)return;
+    const sequence=++cepLookup;
+    lastCEP=cep;cepHint.textContent='Buscando endereço…';
+    const original=Object.fromEntries(['street','district','municipality_name','municipality_code','state_code'].map(key=>[key,customerFormNode.elements[key].value]));
+    try {
+      const address=await api('/postal-codes/'+cep);
+      if(sequence!==cepLookup||!cepInput.isConnected||!dialog.open)return;
+      for(const key of Object.keys(original)) if(customerFormNode.elements[key].value===original[key]) customerFormNode.elements[key].value=address[key]||'';
+      cepHint.textContent='Endereço encontrado. Confira e informe o número.';
+    } catch(error){if(sequence===cepLookup&&cepInput.isConnected){lastCEP='';cepHint.textContent=error.message;}}
+  };
   const nameInput = dialog.querySelector('input[name=name]');
   if (nameInput) nameInput.oninput = () => {
     const start = nameInput.selectionStart, end = nameInput.selectionEnd;
@@ -341,7 +368,10 @@ function customerForm(onCreated) {
     const document = form.elements.document.value.replace(/\D/g,'');
     if (![11,14].includes(document.length)) { dialog.querySelector('#customer-error').textContent = 'Informe CPF com 11 ou CNPJ com 14 dígitos.'; return; }
     button.disabled = true;
-    try { const customer = await api('/customers',{method:'POST',body:{name:form.elements.name.value.trim().toLocaleUpperCase('pt-BR'),document}}); dialog.close(); if (typeof onCreated === 'function') onCreated(customer); else await load(); notice('Tomador cadastrado.'); }
+    try {
+      const details = {};
+      for (const key of ['phone','email','postal_code','municipality_name','municipality_code','state_code','district','street','house_number','complement']) details[key]=form.elements[key].value.trim();
+      const customer = await api(existing ? `/customers/${existing.id}` : '/customers',{method:existing?'PATCH':'POST',body:{name:form.elements.name.value.trim().toLocaleUpperCase('pt-BR'),document,...details}}); dialog.close(); if (typeof onCreated === 'function') onCreated(customer); else await load(); notice(existing?'Tomador atualizado.':'Tomador cadastrado.'); }
     catch(error) { const node=dialog.querySelector('#customer-error'); if(node) node.textContent=error.message; }
     finally { button.disabled = false; }
   };

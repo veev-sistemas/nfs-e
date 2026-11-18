@@ -16,7 +16,7 @@ function DownloadDanfse(Conn: TFDConnection; const Company, Invoice: string): TB
 implementation
 
 uses
-  System.Classes, System.IOUtils, System.DateUtils, System.SyncObjs, Nfse.Certificates,
+  Nfse.CustomerData, System.Classes, System.IOUtils, System.DateUtils, System.SyncObjs, Nfse.Certificates,
   ACBrNFSeX, ACBrDFeSSL, ACBrDFe.Conversao, ACBrNFSeXConversao,
   ACBrNFSeXNotasFiscais, ACBrNFSeXWebserviceBase
   {$IFDEF LINUX}, Posix.Unistd, Posix.SysWait, Posix.Errno{$ENDIF};
@@ -322,6 +322,18 @@ begin
             Customer := Obj(Payload,'customer');
             Tomador.IdentificacaoTomador.CpfCnpj := S(Customer,'document');
             Tomador.RazaoSocial := S(Customer,'name');
+            Tomador.Contato.Telefone := CustomerText(Customer,'phone');
+            Tomador.Contato.Email := CustomerText(Customer,'email');
+            if CustomerText(Customer,'street')<>'' then begin
+              Tomador.Endereco.Endereco := CustomerText(Customer,'street');
+              Tomador.Endereco.Numero := CustomerText(Customer,'house_number');
+              Tomador.Endereco.Complemento := CustomerText(Customer,'complement');
+              Tomador.Endereco.Bairro := CustomerText(Customer,'district');
+              Tomador.Endereco.CEP := CustomerText(Customer,'postal_code');
+              Tomador.Endereco.CodigoMunicipio := CustomerText(Customer,'municipality_code');
+              Tomador.Endereco.xMunicipio := CustomerText(Customer,'municipality_name');
+              Tomador.Endereco.UF := CustomerText(Customer,'state_code');
+            end;
           end;
           Servico.ItemListaServico := S(Settings,'service_code');
           Servico.CodigoTributacaoMunicipio := MunicipalServiceCode(Settings);

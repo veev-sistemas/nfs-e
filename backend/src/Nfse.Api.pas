@@ -3,7 +3,7 @@ unit Nfse.Api;
 interface
 
 uses
-  System.SysUtils, System.Classes, System.JSON, Data.DB,
+  System.SysUtils, System.Classes, System.JSON, Data.DB, Nfse.CustomerData,
   FireDAC.Comp.Client, FireDAC.Stan.Error, FireDAC.Stan.Param,
   Web.HTTPApp, Horse;
 
@@ -25,7 +25,7 @@ type
 
 implementation
 
-uses Nfse.Db, Nfse.Emission, Nfse.Admin, FireDAC.Phys.PGWrapper, System.DateUtils, System.RegularExpressions;
+uses Nfse.PostalCode, Nfse.Db, Nfse.Emission, Nfse.Admin, FireDAC.Phys.PGWrapper, System.DateUtils, System.RegularExpressions;
 
 constructor EApiError.Create(AStatus: Integer; const Message: string);
 begin
@@ -151,6 +151,8 @@ begin
   THorse.Get('/v1/emission-config', Handle);
   THorse.All('/v1/settings', Handle);
   THorse.All('/v1/customers', Handle);
+  THorse.Patch('/v1/customers/:id', Handle);
+  THorse.Get('/v1/postal-codes/:cep', Handle);
   THorse.All('/v1/drafts', Handle);
   THorse.All('/v1/invoices', Handle);
   THorse.All('/v1/invoices/import-homologation', Handle);
@@ -195,7 +197,7 @@ var
   Response: TWebResponse;
   Conn: TFDConnection;
   Q: TFDQuery;
-  Body, Settings: TJSONObject;
+  Body, Settings, Details: TJSONObject;
   V: TJSONValue;
   Company, Token, Route, Method, Customer, Document: string;
   Amount: Int64;
@@ -319,26 +321,50 @@ begin
         Q.ParamByName('settings').AsWideString := Body.ToJSON;
         ReturnQuery;
       end
+      else if (Copy(Route,1,17)='/v1/postal-codes/') and (Method='GET') then
+      begin
+        try Response.Content:=LookupPostalCode(Req.Params['cep']);
+        except
+          on E:EArgumentException do raise EApiError.Create(422,E.Message);
+          on E:Exception do raise EApiError.Create(502,'Consulta de CEP indisponivel. Preencha o endereco manualmente.');
+        end;
+      end
       else if (Route = '/v1/customers') and (Method = 'GET') then
       begin
-        Run('select coalesce(jsonb_agg(to_jsonb(c)), ''[]''::jsonb)::text from ' +
-          '(select id, name, document from customers where company_id = cast(:company as uuid) ' +
+        Run('select coalesce(jsonb_agg((to_jsonb(c)-''details'')||c.details), ''[]''::jsonb)::text from ' +
+          '(select id, name, document, details from customers where company_id = cast(:company as uuid) ' +
           'order by name, id limit 100) c');
         ReturnQuery;
       end
-      else if (Route = '/v1/customers') and (Method = 'POST') then
+      else if ((Route = '/v1/customers') and (Method = 'POST')) or ((Copy(Route,1,14)='/v1/customers/') and (Method='PATCH')) then
       begin
         Body := ParseBody(Request);
         Customer := RequiredString(Body, 'name');
         Document := RequiredString(Body, 'document');
         ValidateDocument(Document);
-        Run('insert into customers(company_id, name, document) values ' +
-          '(cast(:company as uuid), upper(btrim(:name)), :document) returning ' +
-          'jsonb_build_object(''id'', id, ''name'', name, ''document'', document)::text');
-        Q.ParamByName('name').AsWideString := Customer;
-        Q.ParamByName('document').AsWideString := Document;
-        ReturnQuery;
-        Response.StatusCode := 201;
+        try Details:=CustomerDetails(Body);
+        except on E:EArgumentException do raise EApiError.Create(422,E.Message);end;
+        try
+          if Method='POST' then
+            Run('insert into customers(company_id,name,document,details) values '+
+              '(cast(:company as uuid),upper(btrim(:name)),:document,cast(:details as jsonb)) returning '+
+              '(jsonb_build_object(''id'',id,''name'',name,''document'',document)||details)::text')
+          else begin
+            InvoiceId:=Req.Params['id'];
+            try Guid:=StringToGUID('{'+InvoiceId+'}');except on E:EConvertError do raise EApiError.Create(422,'Identificador do tomador invalido.');end;
+            Run('update customers set name=upper(btrim(:name)),document=:document,details=cast(:details as jsonb) '+
+              'where company_id=cast(:company as uuid) and id=cast(:customer_id as uuid) returning '+
+              '(jsonb_build_object(''id'',id,''name'',name,''document'',document)||details)::text');
+            Q.ParamByName('customer_id').AsWideString:=InvoiceId;
+          end;
+          Q.ParamByName('name').AsWideString:=Customer;
+          Q.ParamByName('document').AsWideString:=Document;
+          Q.ParamByName('details').AsWideMemo:=Details.ToJSON;
+          Q.Open;
+          if Q.IsEmpty then raise EApiError.Create(404,'Tomador nao encontrado.');
+          Response.Content:=Q.Fields[0].AsString;
+          if Method='POST' then Response.StatusCode:=201;
+        finally Details.Free;end;
       end
       else if (Route='/v1/emission-config') and (Method='GET') then
         Response.Content:=EmissionConfig(Conn,Company)

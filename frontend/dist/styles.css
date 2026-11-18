@@ -21,3 +21,5 @@
 .invoice-report tr:last-child th,.invoice-report tr:last-child td{border-bottom:0}
 
 .customer-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px}.customer-heading h2{margin:0}
+
+.customer-dialog{max-width:760px;max-height:90vh;overflow-y:auto}.customer-dialog .form-grid{gap:0 20px}

@@ -98,9 +98,16 @@ class Handler(SimpleHTTPRequestHandler):
         elif path == '/settings':
             if self.command == 'PATCH': SETTINGS.update(body)
             self.respond(200,SETTINGS)
+        elif path == '/postal-codes/01001000': self.respond(200,dict(postal_code='01001000',street='PRAÇA DA SÉ',district='SÉ',municipality_name='São Paulo',municipality_code='3550308',state_code='SP'))
+        elif path.startswith('/postal-codes/'): self.respond(422,{'error':'CEP não encontrado na demonstração. Use 01001000.'})
+        elif path.startswith('/customers/') and self.command == 'PATCH':
+            customer=next((c for c in CUSTOMERS if c['id']==path.split('/')[-1]),None)
+            if customer:
+                customer.update(body);customer['name']=body['name'].strip().upper();self.respond(200,customer)
+            else:self.respond(404,{'error':'Tomador não encontrado.'})
         elif path == '/customers':
             if self.command == 'POST':
-                customer = dict(id=str(uuid.uuid4()),name=body['name'].strip().upper(),document=body['document'])
+                customer = dict(body,id=str(uuid.uuid4()));customer['name']=body['name'].strip().upper()
                 CUSTOMERS.append(customer)
                 self.respond(201,customer)
             else: self.respond(200,CUSTOMERS)

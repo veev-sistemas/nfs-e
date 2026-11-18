@@ -46,6 +46,14 @@ begin
       Xml:=Note.GerarXML;
       if Xml='' then Xml:=Note.XmlRps;
       TFile.WriteAllText(TPath.Combine(ParamStr(1),'dps-com-tomador.xml'),Xml,TEncoding.UTF8);
+      Note.NFSe.Tomador.Contato.Telefone:='21999990000';
+      Note.NFSe.Tomador.Contato.Email:='cliente@example.com';
+      with Note.NFSe.Tomador.Endereco do begin
+        Endereco:='RUA DE TESTE';Numero:='74';Complemento:='SALA 2';Bairro:='CENTRO';
+        CEP:='27600000';CodigoMunicipio:='3306107';xMunicipio:='Valença';UF:='RJ';
+      end;
+      Xml:=Note.GerarXML;
+      TFile.WriteAllText(TPath.Combine(ParamStr(1),'dps-tomador-contato.xml'),Xml,TEncoding.UTF8);
       Note.NFSe.IBSCBS.cIndOp := '030101';
       Note.NFSe.IBSCBS.valores.trib.gIBSCBS.CST := cst200;
       Note.NFSe.IBSCBS.valores.trib.gIBSCBS.cClassTrib := '200048';
